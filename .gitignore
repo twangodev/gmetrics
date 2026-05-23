@@ -1,0 +1,7 @@
+/.idea/
+/dist/
+/coverage.out
+*.test
+*.out
+/gmetrics
+/gmetrics.exe
