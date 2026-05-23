@@ -1,0 +1,169 @@
+name: gmetrics
+description: Generate GitHub stats SVG infographics (Go port of lowlighter/metrics)
+author: gmetrics contributors
+
+inputs:
+  token:
+    description: GitHub personal access token with user:email scope
+    required: true
+  user:
+    description: GitHub login of the target user
+    required: false
+  filename:
+    description: Output file path
+    required: false
+    default: github-metrics.svg
+  output_action:
+    description: 'Output mode (v1 supports: none)'
+    required: false
+    default: none
+  base:
+    description: Comma-separated base sections (header, activity, community, repositories, metadata)
+    required: false
+    default: "header, activity, community, repositories, metadata"
+  base_hireable:
+    description: Show "Available for hire!" badge
+    required: false
+    default: 'no'
+  base_indepth:
+    description: Enable in-depth base mode
+    required: false
+    default: 'no'
+  commits_authoring:
+    description: Comma-separated email/login aliases for commit authorship attribution
+    required: false
+  repositories:
+    description: Max repos to fetch
+    required: false
+    default: '100'
+  repositories_batch:
+    description: Repos per API query batch
+    required: false
+    default: '100'
+  repositories_affiliations:
+    description: Comma-separated repo affiliations (owner, collaborator, organization_member)
+    required: false
+    default: 'owner'
+
+  plugin_languages:
+    description: Enable the languages plugin
+    required: false
+    default: 'no'
+  plugin_languages_ignored:
+    description: Comma-separated languages to ignore
+    required: false
+  plugin_languages_limit:
+    description: Max languages to display
+    required: false
+    default: '8'
+  plugin_languages_sections:
+    description: Sections (most-used)
+    required: false
+    default: 'most-used'
+  plugin_languages_details:
+    description: Detail types (percentage, bytes-size, lines)
+    required: false
+  plugin_languages_other:
+    description: Group remaining languages into "Other"
+    required: false
+    default: 'no'
+  plugin_languages_indepth:
+    description: Enable indepth mode (clones repos + linguist analysis; slow)
+    required: false
+    default: 'no'
+
+  plugin_people:
+    description: Enable the people plugin
+    required: false
+    default: 'no'
+  plugin_people_types:
+    description: People types to display
+    required: false
+    default: 'followers, following'
+  plugin_people_limit:
+    description: Max people per type
+    required: false
+    default: '24'
+  plugin_people_size:
+    description: Avatar size in pixels
+    required: false
+    default: '28'
+
+  plugin_wakatime:
+    description: Enable the WakaTime plugin
+    required: false
+    default: 'no'
+  plugin_wakatime_token:
+    description: WakaTime API token
+    required: false
+  plugin_wakatime_url:
+    description: WakaTime API base URL (override for self-hosted wakapi)
+    required: false
+    default: 'https://wakatime.com'
+  plugin_wakatime_user:
+    description: WakaTime user (default 'current')
+    required: false
+    default: 'current'
+  plugin_wakatime_days:
+    description: 'Range in days: 7, 30, 180, or 365'
+    required: false
+    default: '7'
+  plugin_wakatime_sections:
+    description: Comma-separated sections (time, projects, projects-graphs, languages, languages-graphs, editors, editors-graphs, os, os-graphs)
+    required: false
+  plugin_wakatime_limit:
+    description: Top N per category for graphs
+    required: false
+    default: '5'
+
+  plugin_music:
+    description: Enable the music plugin
+    required: false
+    default: 'no'
+  plugin_music_provider:
+    description: 'Music provider (v1 supports: lastfm)'
+    required: false
+  plugin_music_mode:
+    description: 'Music mode (v1 supports: recent)'
+    required: false
+  plugin_music_user:
+    description: Music provider username
+    required: false
+  plugin_music_token:
+    description: Music provider token
+    required: false
+  plugin_music_limit:
+    description: Number of tracks to display
+    required: false
+    default: '4'
+
+  plugin_steam:
+    description: Enable the Steam plugin
+    required: false
+    default: 'no'
+  plugin_steam_token:
+    description: Steam Web API key
+    required: false
+  plugin_steam_user:
+    description: Numeric Steam user ID
+    required: false
+  plugin_steam_sections:
+    description: Comma-separated sections (player, most-played, recently-played)
+    required: false
+    default: 'player, most-played, recently-played'
+  plugin_steam_recent_games_limit:
+    description: Recently-played games to show
+    required: false
+    default: '1'
+  plugin_steam_achievements_limit:
+    description: Achievements per game (v1 ignores this; reserved)
+    required: false
+    default: '0'
+
+runs:
+  using: docker
+  image: Dockerfile
+
+branding:
+  icon: bar-chart-2
+  color: blue
