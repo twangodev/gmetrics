@@ -1,9 +1,13 @@
-name: Go
+name: Build
 
 on:
   push:
-  release:
-    types: [published]
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
   test:
@@ -15,9 +19,25 @@ jobs:
           go-version-file: "go.mod"
       - run: go test ./... -race
       - run: go vet ./...
+      - run: go build ./...
+
+  release-please:
+    needs: [test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v5
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
 
   build:
-    needs: test
+    needs: [release-please]
+    if: ${{ needs.release-please.outputs.release_created }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -64,13 +84,15 @@ jobs:
             ext: ""
     steps:
       - uses: actions/checkout@v6
-
-      - name: Set binary name
-        run: echo "BINARY_NAME=gmetrics-${{ matrix.name }}-${{ github.ref_name }}${{ matrix.ext }}" >> $GITHUB_ENV
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
 
       - uses: actions/setup-go@v6
         with:
           go-version-file: "go.mod"
+
+      - name: Set binary name
+        run: echo "BINARY_NAME=gmetrics-${{ matrix.name }}${{ matrix.ext }}" >> $GITHUB_ENV
 
       - name: Build
         env:
@@ -79,29 +101,28 @@ jobs:
           CGO_ENABLED: 0
         run: go build -trimpath -ldflags="-s -w" -o "${{ env.BINARY_NAME }}" ./cmd/gmetrics
 
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@v3
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-path: "${{ env.BINARY_NAME }}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: gmetrics-${{ matrix.name }}
           path: gmetrics-*
 
-  release:
-    needs: build
-    if: github.event_name == 'release'
+  upload-release-assets:
+    needs: [release-please, build]
+    if: ${{ needs.release-please.outputs.release_created }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
 
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            artifacts/gmetrics-*
+      - name: Upload assets to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ needs.release-please.outputs.tag_name }}" artifacts/*
