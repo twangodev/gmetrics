@@ -1,0 +1,32 @@
+user: twangodev
+filename: github-metrics-sidebar.svg
+
+base:
+  sections: []
+
+plugins:
+  wakatime:
+    enabled: true
+    sections:
+      - time
+      - projects
+      - projects-graphs
+      - languages
+      - languages-graphs
+      - editors
+      - editors-graphs
+      - os
+      - os-graphs
+    days: 7
+
+  music:
+    enabled: true
+    provider: lastfm
+    mode: recent
+    limit: 4
+
+  steam:
+    enabled: true
+    sections: [player, most-played, recently-played]
+    recent_games_limit: 1
+    achievements_limit: 0

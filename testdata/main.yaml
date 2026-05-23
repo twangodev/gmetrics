@@ -1,0 +1,30 @@
+user: twangodev
+filename: github-metrics.svg
+
+base:
+  sections: [header, activity, community, repositories, metadata]
+  hireable: true
+  indepth: true
+  commits_authoring:
+    - .user.login
+    - 48845764+twangodev@users.noreply.github.com
+    - james@fish.audio
+  repositories:
+    affiliations: [owner, collaborator, organization_member]
+    max: 1000
+    batch: 50
+
+plugins:
+  languages:
+    enabled: true
+    sections: [most-used]
+    details: [percentage]
+    ignored: [markdown]
+    other: false
+    limit: 8
+
+  people:
+    enabled: true
+    types: [followers, following]
+    limit: 24
+    size: 28
