@@ -1,0 +1,68 @@
+package githubapi
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/url"
+
+	"github.com/google/go-github/v66/github"
+	"github.com/shurcooL/githubv4"
+	"golang.org/x/oauth2"
+)
+
+// Config configures construction of GitHub REST + GraphQL clients.
+type Config struct {
+	Token          string       // required
+	RESTBaseURL    string       // override for tests/enterprise (must end with "/")
+	GraphQLBaseURL string       // override for tests/enterprise (full URL, e.g. ".../graphql")
+	HTTPClient     *http.Client // optional underlying transport (will have OAuth wrapped over it)
+}
+
+type Clients struct {
+	REST    *github.Client
+	GraphQL *githubv4.Client
+}
+
+func New(ctx context.Context, cfg Config) (*Clients, error) {
+	if cfg.Token == "" {
+		return nil, fmt.Errorf("github token required")
+	}
+	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: cfg.Token})
+
+	// oauth2.NewClient layers an authedTransport over its inner client.
+	// If the caller supplied an HTTPClient (e.g. our retry-equipped one), we
+	// want OAuth tokens to flow through it: wrap the OAuth source as a
+	// RoundTripper over the supplied transport.
+	var httpClient *http.Client
+	if cfg.HTTPClient != nil {
+		base := cfg.HTTPClient
+		// Compose: base.Transport -> oauth2.Transport(Source=ts).
+		httpClient = &http.Client{
+			Transport: &oauth2.Transport{
+				Source: ts,
+				Base:   base.Transport,
+			},
+		}
+	} else {
+		httpClient = oauth2.NewClient(ctx, ts)
+	}
+
+	rest := github.NewClient(httpClient)
+	if cfg.RESTBaseURL != "" {
+		u, err := url.Parse(cfg.RESTBaseURL)
+		if err != nil {
+			return nil, fmt.Errorf("parse rest base url: %w", err)
+		}
+		rest.BaseURL = u
+	}
+
+	var gql *githubv4.Client
+	if cfg.GraphQLBaseURL != "" {
+		gql = githubv4.NewEnterpriseClient(cfg.GraphQLBaseURL, httpClient)
+	} else {
+		gql = githubv4.NewClient(httpClient)
+	}
+
+	return &Clients{REST: rest, GraphQL: gql}, nil
+}
