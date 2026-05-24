@@ -140,8 +140,9 @@ func renderSection(w *strings.Builder, y0 int, name string, d Data, ctx sectionC
 	case "repositories":
 		return renderRepositories(w, y0, d, ctx), true
 	case "metadata":
-		renderMetadata(w, y0, d, ctx.metaFace)
-		return metadataHeight, true
+		// Rendered by the engine as a final fragment so it sits below
+		// every plugin's output, not inline within the base sections.
+		return 0, true
 	}
 	// "calendar" and any other unknown name: render nothing.
 	return 0, false
@@ -575,6 +576,26 @@ func emitIconTextRowAt(w *strings.Builder, startX, baselineY int, icon, text str
 func renderMetadata(w *strings.Builder, y0 int, d Data, face *canvas.FontFace) {
 	msg := "Generated at " + d.Metadata.GeneratedAt + " by twangodev/gmetrics"
 	render.EmitTextPathRightAlignedClass(w, sectionWidth-4, y0+12, msg, face, "text-muted")
+}
+
+// MetadataFragment renders the footer line as a standalone fragment so
+// the engine can place it below every plugin.
+func MetadataFragment(d any) (plugin.Fragment, error) {
+	bd, ok := d.(Data)
+	if !ok {
+		return plugin.Fragment{}, nil
+	}
+	face, err := render.Face(10, canvas.FontRegular)
+	if err != nil {
+		return plugin.Fragment{}, fmt.Errorf("metadata: load face: %w", err)
+	}
+	var w strings.Builder
+	renderMetadata(&w, 0, bd, face)
+	return plugin.Fragment{
+		Body:   w.String(),
+		Width:  sectionWidth,
+		Height: metadataHeight,
+	}, nil
 }
 
 // yearsSince returns the integer number of completed years between then
