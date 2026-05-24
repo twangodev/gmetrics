@@ -2,10 +2,10 @@
 // loaders that build it from YAML files, INPUT_* env vars, and compiled-in
 // defaults. The merge order (lowest to highest priority) is:
 //
-//   1. compiled-in defaults
-//   2. YAML config file
-//   3. INPUT_* env vars
-//   4. CLI flags (applied by the caller after loading)
+//  1. compiled-in defaults
+//  2. YAML config file
+//  3. INPUT_* env vars
+//  4. CLI flags (applied by the caller after loading)
 //
 // koanf/v2 backs the merge; go.yaml.in/yaml/v3 parses YAML.
 package config

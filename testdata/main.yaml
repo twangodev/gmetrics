@@ -2,7 +2,7 @@ user: twangodev
 filename: github-metrics.svg
 
 base:
-  sections: [header, activity, community, repositories, metadata]
+  sections: [header, calendar, activity, community, repositories, metadata]
   hireable: true
   indepth: true
   commits_authoring:
@@ -21,7 +21,8 @@ plugins:
     details: [percentage]
     ignored: [markdown]
     other: false
-    limit: 8
+    limit: 30
+    indepth: true
 
   people:
     enabled: true
