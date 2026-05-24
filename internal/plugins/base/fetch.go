@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/google/go-github/v66/github"
 	"github.com/shurcooL/githubv4"
 	"github.com/twangodev/gmetrics/internal/img"
 	"github.com/twangodev/gmetrics/internal/plugin"
@@ -176,6 +178,20 @@ func Fetch(ctx context.Context, env *plugin.Env, cfg Config) (Data, error) {
 		if err := populateIndepthContributions(ctx, env, login, q.User.CreatedAt.Time, &d); err != nil {
 			if env.Log != nil {
 				env.Log.Warn("base: indepth contributions aggregation failed", "err", err)
+			}
+		}
+	}
+
+	// When commits_authoring is set, replace d.Activity.Commits with the
+	// sum of REST commit-search totals across the configured patterns.
+	// This is more accurate than the GraphQL contributionsCollection count
+	// for users whose commits are authored under multiple email identities
+	// (e.g. github noreply + personal email). Non-fatal on failure: the
+	// previous value of d.Activity.Commits is left in place.
+	if len(cfg.CommitsAuthoring) > 0 && env.REST != nil {
+		if err := populateAuthoredCommitCount(ctx, env, cfg, login, &d); err != nil {
+			if env.Log != nil {
+				env.Log.Warn("base: authored commit count failed", "err", err)
 			}
 		}
 	}
@@ -468,6 +484,121 @@ func populateIndepthContributions(
 	d.Activity.IssuesOpened = issues
 
 	return nil
+}
+
+// maxAuthoringPatterns caps how many commits_authoring entries we will
+// search. GitHub's commit-search REST endpoint is rate-limited to 30
+// requests/minute, so we keep this conservative to avoid burning the
+// whole quota on a single render. Entries beyond the cap are logged
+// and skipped.
+const maxAuthoringPatterns = 5
+
+// populateAuthoredCommitCount iterates each cfg.CommitsAuthoring entry,
+// translates it to a commit-search query (author:<login> for login-style
+// entries, author-email:<email> otherwise), and issues a paginated
+// search.commits REST call with PerPage=1 to read result.GetTotal().
+// The per-pattern totals are summed into d.Activity.AuthoredCommits,
+// and on success d.Activity.Commits is REPLACED by that sum (matching
+// upstream's behavior when commits_authoring is configured).
+//
+// The function is intentionally tolerant: errors from individual patterns
+// are logged and skipped. If every pattern errors and the running total
+// is zero, the function returns the first error so the caller can log a
+// single representative failure and leave d.Activity.Commits untouched.
+func populateAuthoredCommitCount(
+	ctx context.Context,
+	env *plugin.Env,
+	cfg Config,
+	login string,
+	d *Data,
+) error {
+	patterns := cfg.CommitsAuthoring
+	if len(patterns) > maxAuthoringPatterns {
+		if env.Log != nil {
+			env.Log.Warn(
+				"base: commits_authoring exceeds cap; truncating",
+				"count", len(patterns),
+				"cap", maxAuthoringPatterns,
+			)
+		}
+		patterns = patterns[:maxAuthoringPatterns]
+	}
+
+	var (
+		total      int
+		queried    int
+		firstErr   error
+		loginLower = strings.ToLower(login)
+	)
+
+	for _, raw := range patterns {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		entry := strings.TrimSpace(raw)
+		if entry == "" {
+			continue
+		}
+
+		query := buildCommitSearchQuery(entry, login, loginLower)
+		if query == "" {
+			continue
+		}
+
+		result, _, err := env.REST.Search.Commits(ctx, query, &github.SearchOptions{
+			ListOptions: github.ListOptions{PerPage: 1},
+		})
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("base: commit search %q: %w", query, err)
+			}
+			if env.Log != nil {
+				env.Log.Warn(
+					"base: commit search failed",
+					"query", query,
+					"err", err,
+				)
+			}
+			continue
+		}
+
+		total += result.GetTotal()
+		queried++
+	}
+
+	if queried == 0 {
+		if firstErr != nil {
+			return firstErr
+		}
+		// No patterns produced a query (all empty/blank); leave Commits as-is.
+		return nil
+	}
+
+	d.Activity.AuthoredCommits = total
+	d.Activity.Commits = total
+	return nil
+}
+
+// buildCommitSearchQuery turns a single commits_authoring entry into a
+// GitHub commit-search query string. The placeholder ".user.login" and
+// any entry equal to (or @-prefixed equivalent of) the user's login map
+// to "author:<login>"; everything else is treated as an email pattern
+// and emitted as "author-email:<entry>".
+func buildCommitSearchQuery(entry, login, loginLower string) string {
+	if entry == "" {
+		return ""
+	}
+	trimmed := strings.TrimPrefix(entry, "@")
+	if entry == ".user.login" || strings.EqualFold(trimmed, login) || strings.EqualFold(trimmed, loginLower) {
+		if login == "" {
+			return ""
+		}
+		return "author:" + login
+	}
+	return "author-email:" + entry
 }
 
 // lastNDays flattens the (weeks → days) contribution calendar produced by
