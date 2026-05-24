@@ -3,6 +3,7 @@ package render
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/tdewolff/canvas"
 )
@@ -93,11 +94,131 @@ func EmitTextPathRightAlignedClass(w io.Writer, rightX, baselineY int, s string,
 // PathDataFor converts a string to SVG path data using the supplied face.
 // Returns the empty string when the font produces no glyph paths (e.g.
 // the input is whitespace only); callers fall through gracefully.
+//
+// The output is run through SanitizePathData so a malformed command (e.g.
+// a 5-arg cubic Bezier emitted by tdewolff/canvas when two coordinates
+// fuse) doesn't poison the rest of the path in resvg / Chromium.
 func PathDataFor(face *canvas.FontFace, s string) string {
 	p, _, err := face.ToPath(s)
 	if err != nil || p == nil || p.Empty() {
 		return ""
 	}
-	return p.ToSVG()
+	return SanitizePathData(p.ToSVG())
+}
+
+// SanitizePathData rewrites SVG path data so each command's argument
+// count is a whole multiple of the expected per-command arity. Surplus
+// trailing args are dropped; commands with zero complete argument
+// groups are removed entirely.
+func SanitizePathData(d string) string {
+	if d == "" {
+		return d
+	}
+	tokens := tokenizePath(d)
+	argCount := map[byte]int{
+		'M': 2, 'L': 2, 'H': 1, 'V': 1, 'Z': 0,
+		'C': 6, 'S': 4, 'Q': 4, 'T': 2, 'A': 7,
+	}
+	var b strings.Builder
+	i := 0
+	for i < len(tokens) {
+		tok := tokens[i]
+		if len(tok) == 1 && isPathCmd(tok[0]) {
+			cmd := tok[0]
+			i++
+			args := []string{}
+			for i < len(tokens) && !(len(tokens[i]) == 1 && isPathCmd(tokens[i][0])) {
+				args = append(args, tokens[i])
+				i++
+			}
+			ac := argCount[toUpperByte(cmd)]
+			if ac == 0 {
+				b.WriteByte(cmd)
+				continue
+			}
+			full := (len(args) / ac) * ac
+			if full == 0 {
+				continue
+			}
+			b.WriteByte(cmd)
+			for j, a := range args[:full] {
+				if j > 0 {
+					b.WriteByte(' ')
+				}
+				b.WriteString(a)
+			}
+		} else {
+			i++
+		}
+	}
+	return b.String()
+}
+
+func isPathCmd(c byte) bool {
+	switch c {
+	case 'M', 'm', 'L', 'l', 'H', 'h', 'V', 'v', 'Z', 'z',
+		'C', 'c', 'S', 's', 'Q', 'q', 'T', 't', 'A', 'a':
+		return true
+	}
+	return false
+}
+
+func toUpperByte(c byte) byte {
+	if c >= 'a' && c <= 'z' {
+		return c - 32
+	}
+	return c
+}
+
+// tokenizePath splits SVG path data into command letters and decimal
+// number strings, following SVG parser conventions (a second '.' starts
+// a new number).
+func tokenizePath(d string) []string {
+	out := []string{}
+	n := len(d)
+	i := 0
+	for i < n {
+		c := d[i]
+		switch {
+		case c == ' ' || c == ',' || c == '\t' || c == '\n' || c == '\r':
+			i++
+		case isPathCmd(c):
+			out = append(out, string(c))
+			i++
+		default:
+			start := i
+			if c == '+' || c == '-' {
+				i++
+			}
+			sawDot := false
+			for i < n {
+				cc := d[i]
+				switch {
+				case cc >= '0' && cc <= '9':
+					i++
+				case cc == '.':
+					if sawDot {
+						goto done
+					}
+					sawDot = true
+					i++
+				case cc == 'e' || cc == 'E':
+					i++
+					if i < n && (d[i] == '+' || d[i] == '-') {
+						i++
+					}
+				default:
+					goto done
+				}
+			}
+		done:
+			if i > start {
+				out = append(out, d[start:i])
+			} else {
+				i++
+			}
+		}
+	}
+	return out
 }
 
