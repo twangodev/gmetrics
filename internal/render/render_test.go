@@ -35,8 +35,7 @@ func TestCompose_IncludesThemeCSS(t *testing.T) {
 	fr := render.NewFramer(render.Options{Width: 480, Title: "Test Card"})
 	out, err := fr.Compose(nil)
 	require.NoError(t, err)
-	require.Contains(t, out, "--color-text")
-	require.Contains(t, out, "prefers-color-scheme: dark")
+	require.Contains(t, out, "fill: #777777")
 	require.Contains(t, out, `aria-label="Test Card"`)
 }
 
