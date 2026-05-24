@@ -32,8 +32,9 @@ var gitEnv = []string{"GIT_TERMINAL_PROMPT=0"}
 
 // buildAuthorPredicates returns lower-cased substrings to pass as
 // `--author=` patterns. ".user.login" expands into the bare login plus
-// both GitHub noreply forms.
-func buildAuthorPredicates(env *plugin.Env, cfg Config) []string {
+// both GitHub noreply forms; emails bound to the user's public GPG keys
+// are also auto-included.
+func buildAuthorPredicates(ctx context.Context, env *plugin.Env, cfg Config) []string {
 	login := env.Login
 	if login == "" {
 		login = env.User.Login
@@ -74,6 +75,21 @@ func buildAuthorPredicates(env *plugin.Env, cfg Config) []string {
 		add(entry)
 	}
 
+	if env.REST != nil && login != "" {
+		keys, _, err := env.REST.Users.ListGPGKeys(ctx, login, nil)
+		if err == nil {
+			for _, k := range keys {
+				for _, e := range k.Emails {
+					if email := e.GetEmail(); email != "" {
+						add(email)
+					}
+				}
+			}
+		} else if env.Log != nil {
+			env.Log.Debug("languages: gpg keys fetch failed", "user", login, "err", err)
+		}
+	}
+
 	return out
 }
 
@@ -105,7 +121,7 @@ func fetchIndepth(ctx context.Context, env *plugin.Env, cfg Config) (Data, error
 		return Data{}, fmt.Errorf("languages: fetch indepth: env.Login is empty")
 	}
 
-	preds := buildAuthorPredicates(env, cfg)
+	preds := buildAuthorPredicates(ctx, env, cfg)
 	if env.Log != nil {
 		env.Log.Info("languages: indepth author predicates", "count", len(preds))
 	}
