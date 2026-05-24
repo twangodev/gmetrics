@@ -25,7 +25,8 @@ func TestRender_TwoSections(t *testing.T) {
 		Size: 28,
 		Sections: []people.Section{
 			{
-				Type: "followers",
+				Type:  "followers",
+				Total: 1234,
 				People: []people.Person{
 					{Login: "alice"},
 					{Login: "bob"},
@@ -33,7 +34,8 @@ func TestRender_TwoSections(t *testing.T) {
 				},
 			},
 			{
-				Type: "following",
+				Type:  "following",
+				Total: 42,
 				People: []people.Person{
 					{Login: "dave"},
 					{Login: "eve"},
@@ -49,12 +51,15 @@ func TestRender_TwoSections(t *testing.T) {
 		"two sections with header + one row each should be at least 2 * (28 + 28 + 4 + 8) ~= 136 px")
 
 	// Sanity: the body must contain both section markers and a placeholder
-	// circle for every person (5 people total).
+	// circle for every person (5 people total). Section headers are
+	// rendered as glyph <path> elements (text-as-path) so we can't grep
+	// for the literal "Followers (3)" substring; instead we assert one
+	// header <path> per section.
 	require.Contains(t, frag.Body, `data-type="followers"`)
 	require.Contains(t, frag.Body, `data-type="following"`)
 	require.Equal(t, 5, strings.Count(frag.Body, "<circle"))
-	require.Contains(t, frag.Body, "Followers (3)")
-	require.Contains(t, frag.Body, "Following (2)")
+	require.GreaterOrEqual(t, strings.Count(frag.Body, "<path"), 2,
+		"each section should contribute one header <path> element")
 }
 
 // TestFetch_FollowersAndFollowing_Counts spins up a mock GraphQL endpoint
@@ -74,6 +79,7 @@ func TestFetch_FollowersAndFollowing_Counts(t *testing.T) {
 				"data": map[string]any{
 					"user": map[string]any{
 						"followers": map[string]any{
+							"totalCount": 1234,
 							"nodes": []map[string]any{
 								{"login": "alice", "avatarUrl": "https://example.invalid/a.png"},
 								{"login": "bob", "avatarUrl": "https://example.invalid/b.png"},
@@ -87,6 +93,7 @@ func TestFetch_FollowersAndFollowing_Counts(t *testing.T) {
 				"data": map[string]any{
 					"user": map[string]any{
 						"following": map[string]any{
+							"totalCount": 42,
 							"nodes": []map[string]any{
 								{"login": "carol", "avatarUrl": "https://example.invalid/c.png"},
 							},
@@ -122,11 +129,16 @@ func TestFetch_FollowersAndFollowing_Counts(t *testing.T) {
 	require.True(t, ok, "Fetch must return people.Data, got %T", out)
 	require.Len(t, data.Sections, 2)
 	require.Equal(t, "followers", data.Sections[0].Type)
+	require.Equal(t, 1234, data.Sections[0].Total,
+		"Section.Total should be populated from user.followers.totalCount, "+
+			"not derived from the number of returned nodes")
 	require.Len(t, data.Sections[0].People, 2)
 	require.Equal(t, "alice", data.Sections[0].People[0].Login)
 	require.Empty(t, data.Sections[0].People[0].AvatarB64,
 		"avatars should be unfetched when env.HTTP is nil")
 	require.Equal(t, "following", data.Sections[1].Type)
+	require.Equal(t, 42, data.Sections[1].Total,
+		"Section.Total should be populated from user.following.totalCount")
 	require.Len(t, data.Sections[1].People, 1)
 	require.Equal(t, "carol", data.Sections[1].People[0].Login)
 }

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/tdewolff/canvas"
 	"github.com/twangodev/gmetrics/internal/plugin"
+	"github.com/twangodev/gmetrics/internal/render"
 )
 
 // fragmentWidth is the working width every plugin draws against. It matches
@@ -39,6 +41,12 @@ func (*Plugin) Render(env *plugin.Env, raw any) (plugin.Fragment, error) {
 		return plugin.Fragment{}, fmt.Errorf("people: render: invalid Size %d", data.Size)
 	}
 
+	// Build the header font face once and reuse across every section.
+	headerFace, err := render.Face(14, canvas.FontBold)
+	if err != nil {
+		return plugin.Fragment{}, fmt.Errorf("people: load header face: %w", err)
+	}
+
 	cellSize := data.Size
 	stride := cellSize + rowGap
 	cols := fragmentWidth / stride
@@ -50,7 +58,7 @@ func (*Plugin) Render(env *plugin.Env, raw any) (plugin.Fragment, error) {
 	y := 0
 	for _, section := range data.Sections {
 		secH := sectionHeight(len(section.People), cellSize, cols)
-		writeSection(&buf, section, y, cellSize, cols)
+		writeSection(&buf, section, y, cellSize, cols, headerFace)
 		y += secH
 	}
 
@@ -74,20 +82,16 @@ func sectionHeight(n, cellSize, cols int) int {
 }
 
 // writeSection emits one section's SVG into buf at the given y offset.
-func writeSection(buf *bytes.Buffer, s Section, y, cellSize, cols int) {
+func writeSection(buf *bytes.Buffer, s Section, y, cellSize, cols int, headerFace *canvas.FontFace) {
 	fmt.Fprintf(buf, `<g class="people-section" data-type="%s" transform="translate(0,%d)">`,
 		xmlEscape(s.Type), y)
 
-	// Header text: "<type> (<count>)". Bold, baseline 18px so the 28px band
-	// has visual breathing room above and below.
-	header := fmt.Sprintf("%s (%d)", titleCase(s.Type), len(s.People))
-	fmt.Fprintf(buf,
-		`<text x="0" y="18" font-size="14" font-weight="600" fill="var(--color-text)">%s</text>`,
-		xmlEscape(header),
-	)
+	// "%d %s" uses s.Total (not the rendered avatar count) so a truncated
+	// list still labels with the full upstream count.
+	header := fmt.Sprintf("%d %s", s.Total, sectionLabel(s.Type, s.Total))
+	render.EmitOcticon(buf, 0, 6, 16, "people", "#959da5")
+	render.EmitTextPath(buf, 22, 18, header, headerFace)
 
-	// Avatar grid. The header band is `headerHeight` tall; the first row of
-	// avatars sits directly beneath it.
 	for i, p := range s.People {
 		col := i % cols
 		row := i / cols
@@ -104,9 +108,16 @@ func writeSection(buf *bytes.Buffer, s Section, y, cellSize, cols int) {
 // the layout remains visible in test mode (env.HTTP == nil).
 func writeAvatar(buf *bytes.Buffer, p Person, x, y, size int) {
 	if p.AvatarB64 != "" {
+		// Each avatar gets its own <clipPath> referencing a unique id so
+		// SVG circle clipping works in renderers that don't support the
+		// inline `clip-path: circle()` shorthand (resvg, librsvg, etc.).
+		clipID := fmt.Sprintf("avatar-clip-%s-%d-%d", p.Login, x, y)
+		cx := x + size/2
+		cy := y + size/2
+		r := size / 2
 		fmt.Fprintf(buf,
-			`<image x="%d" y="%d" width="%d" height="%d" href="%s"><title>%s</title></image>`,
-			x, y, size, size, xmlEscapeAttr(p.AvatarB64), xmlEscape(p.Login),
+			`<defs><clipPath id="%s"><circle cx="%d" cy="%d" r="%d"/></clipPath></defs><image x="%d" y="%d" width="%d" height="%d" href="%s" clip-path="url(#%s)" preserveAspectRatio="xMidYMid slice"><title>%s</title></image>`,
+			clipID, cx, cy, r, x, y, size, size, xmlEscapeAttr(p.AvatarB64), clipID, xmlEscape(p.Login),
 		)
 		return
 	}
@@ -117,20 +128,28 @@ func writeAvatar(buf *bytes.Buffer, p Person, x, y, size int) {
 	cy := y + size/2
 	r := size / 2
 	fmt.Fprintf(buf,
-		`<circle cx="%d" cy="%d" r="%d" fill="var(--color-border)"><title>%s</title></circle>`,
+		`<circle cx="%d" cy="%d" r="%d" fill="#d0d7de"><title>%s</title></circle>`,
 		cx, cy, r, xmlEscape(p.Login),
 	)
 }
 
-// titleCase upper-cases the first byte of s. We avoid x/text/cases for a
-// single-character change and accept that "following" -> "Following" is
-// always ASCII-safe in this scope (the only allowed values are
-// "followers", "following").
-func titleCase(s string) string {
-	if s == "" {
-		return s
+// sectionLabel returns the lowercase, pluralized noun that follows the
+// total count in a section header, matching the upstream lowlighter-metrics
+// classic template. Unknown types fall back to the type name unchanged.
+func sectionLabel(t string, total int) string {
+	switch t {
+	case "followers":
+		if total == 1 {
+			return "follower"
+		}
+		return "followers"
+	case "following":
+		// Upstream uses the past-tense form "followed" rather than the
+		// gerund "following" for this section label.
+		return "followed"
+	default:
+		return t
 	}
-	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 // xmlEscape escapes content for use as text inside an SVG element.

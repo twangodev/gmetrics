@@ -10,11 +10,13 @@ import (
 )
 
 // followersQuery returns up to `first` followers of the user, with each
-// avatar URL pre-sized to the requested pixel size.
+// avatar URL pre-sized to the requested pixel size. TotalCount is the
+// upstream count (which may exceed the number of returned nodes).
 type followersQuery struct {
 	User struct {
 		Followers struct {
-			Nodes []struct {
+			TotalCount githubv4.Int
+			Nodes      []struct {
 				Login     githubv4.String
 				AvatarURL githubv4.String `graphql:"avatarUrl(size: $size)"`
 			}
@@ -26,7 +28,8 @@ type followersQuery struct {
 type followingQuery struct {
 	User struct {
 		Following struct {
-			Nodes []struct {
+			TotalCount githubv4.Int
+			Nodes      []struct {
 				Login     githubv4.String
 				AvatarURL githubv4.String `graphql:"avatarUrl(size: $size)"`
 			}
@@ -63,18 +66,20 @@ func (*Plugin) Fetch(ctx context.Context, env *plugin.Env, raw any) (any, error)
 	data := Data{Size: cfg.Size}
 
 	for _, t := range cfg.Types {
-		people, err := fetchType(ctx, env, login, t, cfg)
+		people, total, err := fetchType(ctx, env, login, t, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("people: fetch %s: %w", t, err)
 		}
-		data.Sections = append(data.Sections, Section{Type: t, People: people})
+		data.Sections = append(data.Sections, Section{Type: t, Total: total, People: people})
 	}
 	return data, nil
 }
 
 // fetchType dispatches on the requested type and runs the corresponding
-// GraphQL query, then (optionally) converts avatar URLs to data: URLs.
-func fetchType(ctx context.Context, env *plugin.Env, login, t string, cfg Config) ([]Person, error) {
+// GraphQL query, then (optionally) converts avatar URLs to data: URLs. The
+// returned total is the upstream totalCount, which may exceed len(people)
+// when Config.Limit is smaller than the user's full follower/following set.
+func fetchType(ctx context.Context, env *plugin.Env, login, t string, cfg Config) ([]Person, int, error) {
 	// GitHub serves the avatar at the requested size; we ask for 2x the
 	// render size so the bitmap is crisp on retina displays.
 	avatarSize := cfg.Size * 2
@@ -88,13 +93,15 @@ func fetchType(ctx context.Context, env *plugin.Env, login, t string, cfg Config
 		Login     githubv4.String
 		AvatarURL githubv4.String
 	}
+	var total int
 
 	switch t {
 	case "followers":
 		var q followersQuery
 		if err := env.GraphQL.Query(ctx, &q, vars); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
+		total = int(q.User.Followers.TotalCount)
 		for _, n := range q.User.Followers.Nodes {
 			nodes = append(nodes, struct {
 				Login     githubv4.String
@@ -104,8 +111,9 @@ func fetchType(ctx context.Context, env *plugin.Env, login, t string, cfg Config
 	case "following":
 		var q followingQuery
 		if err := env.GraphQL.Query(ctx, &q, vars); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
+		total = int(q.User.Following.TotalCount)
 		for _, n := range q.User.Following.Nodes {
 			nodes = append(nodes, struct {
 				Login     githubv4.String
@@ -113,7 +121,7 @@ func fetchType(ctx context.Context, env *plugin.Env, login, t string, cfg Config
 			}{n.Login, n.AvatarURL})
 		}
 	default:
-		return nil, fmt.Errorf("unsupported type %q", t)
+		return nil, 0, fmt.Errorf("unsupported type %q", t)
 	}
 
 	out := make([]Person, 0, len(nodes))
@@ -134,5 +142,5 @@ func fetchType(ctx context.Context, env *plugin.Env, login, t string, cfg Config
 		}
 		out = append(out, p)
 	}
-	return out, nil
+	return out, total, nil
 }

@@ -9,9 +9,13 @@ type Person struct {
 	AvatarB64 string
 }
 
-// Section is one labelled grid (e.g. "followers (42)") in the rendered card.
+// Section is one labelled grid (e.g. "1234 followers") in the rendered card.
+// Total is the upstream total reported by GitHub (e.g.
+// user.followers.totalCount), which may exceed len(People) when the section
+// is limited by Config.Limit.
 type Section struct {
 	Type   string
+	Total  int
 	People []Person
 }
 
