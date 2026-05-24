@@ -30,7 +30,6 @@ type Framer struct {
 // are pre-sanitized SVG markup that must be emitted verbatim, not escaped.
 const frameTmpl = `<svg xmlns="http://www.w3.org/2000/svg" width="{{.Width}}" height="{{.Height}}" viewBox="0 0 {{.Width}} {{.Height}}" role="img"{{if .Title}} aria-label="{{.Title}}"{{end}}>
 <style>{{.CSS}}</style>
-<rect class="frame" x="0.5" y="0.5" width="{{.FrameW}}" height="{{.FrameH}}" rx="6"/>
 {{range .Items}}<g transform="translate({{.X}},{{.Y}})">{{.Body}}</g>
 {{end}}</svg>`
 
