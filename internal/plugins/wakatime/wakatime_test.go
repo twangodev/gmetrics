@@ -98,8 +98,15 @@ func TestRender_AllSections_ProducesSVG(t *testing.T) {
 	require.NotEmpty(t, frag.Body)
 	require.Greater(t, frag.Height, 100)
 	require.Equal(t, 440, frag.Width)
-	// Stripped outer svg.
-	require.False(t, strings.HasPrefix(strings.TrimSpace(frag.Body), "<svg"))
+	// The fragment is wrapped by the framer at compose time, so it must
+	// not contain a root `<svg width=...` wrapper of its own. Inline
+	// octicons emit `<svg x=...>` glyph blocks; those are expected. The
+	// guard below catches a regression that re-emits an outer document.
+	require.NotContains(t, frag.Body, `<svg xmlns`,
+		"fragment must not contain an outer SVG document element")
+	require.NotContains(t, frag.Body, `<svg width=`,
+		"fragment must not contain an outer SVG document element")
+	_ = strings.TrimSpace // keep the import live for future assertions
 }
 
 func TestPlugin_RegistersUnderName(t *testing.T) {

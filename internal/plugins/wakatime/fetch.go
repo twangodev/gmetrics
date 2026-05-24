@@ -16,12 +16,12 @@ import (
 // care about. Unused fields are ignored by encoding/json.
 type apiResponse struct {
 	Data struct {
-		TotalSeconds  float64       `json:"total_seconds"`
-		DailyAverage  float64       `json:"daily_average"`
-		Projects      []rawCategory `json:"projects"`
-		Languages     []rawCategory `json:"languages"`
-		Editors       []rawCategory `json:"editors"`
-		OperatingSys  []rawCategory `json:"operating_systems"`
+		TotalSeconds float64       `json:"total_seconds"`
+		DailyAverage float64       `json:"daily_average"`
+		Projects     []rawCategory `json:"projects"`
+		Languages    []rawCategory `json:"languages"`
+		Editors      []rawCategory `json:"editors"`
+		OperatingSys []rawCategory `json:"operating_systems"`
 	} `json:"data"`
 }
 
