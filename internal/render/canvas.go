@@ -54,16 +54,21 @@ func loadFonts() (*canvas.FontFamily, error) {
 	return fontFamily, fontErr
 }
 
-// Face returns a canvas font face at the given size in points and weight
-// (canvas.FontRegular or canvas.FontBold). The returned *canvas.FontFace is
-// what tdewolff/canvas APIs such as canvas.NewRichText accept; the spec
-// originally described this as *canvas.Font but the live API uses FontFace.
-func Face(sizePt float64, style canvas.FontStyle) (*canvas.FontFace, error) {
+// Face returns a canvas font face at the given size **in pixels**.
+//
+// The underlying canvas.FontFamily.Face accepts a size in *points* and
+// converts to mm internally (Size = sizePt * mmPerPt, where mmPerPt =
+// 25.4/72). Our SVG output maps 1 canvas mm to 1 SVG user unit (1 px),
+// so a caller asking for "14 px text" needs us to pass sizePt = 14 *
+// 72/25.4 ≈ 39.7 pt to canvas. ptPerPx encapsulates that conversion.
+const ptPerPx = 72.0 / 25.4
+
+func Face(sizePx float64, style canvas.FontStyle) (*canvas.FontFace, error) {
 	ff, err := loadFonts()
 	if err != nil {
 		return nil, err
 	}
-	return ff.Face(sizePt, canvas.Black, style, canvas.FontNormal), nil
+	return ff.Face(sizePx*ptPerPx, canvas.Black, style, canvas.FontNormal), nil
 }
 
 // NewFragment creates a virtual canvas that a plugin draws onto and a context
