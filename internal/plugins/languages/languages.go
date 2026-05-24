@@ -128,7 +128,7 @@ func (*Plugin) Render(env *plugin.Env, raw any) (plugin.Fragment, error) {
 	if !ok {
 		return plugin.Fragment{}, fmt.Errorf("languages: render: want Data, got %T", raw)
 	}
-	return render(env, data)
+	return renderFragment(env, data)
 }
 
 // toStringSlice accepts []string, []any (each entry stringable), or a single

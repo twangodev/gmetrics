@@ -11,14 +11,16 @@ type Lang struct {
 }
 
 // Data is the value Fetch returns and Render consumes. Total is the
-// sum of Lang.Bytes across the (post-filter) visible languages — i.e. the
-// denominator the percentages were computed against. Indepth records which
-// path Fetch took; Render uses it for the small "estimation from N bytes of
-// code" caption upstream surfaces in indepth mode.
+// sum of Lang.Bytes across the (post-filter) visible languages.
 type Data struct {
 	Sections []string
 	Details  []string
 	Total    int
 	Langs    []Lang
 	Indepth  bool
+
+	// Indepth-only stats; zero in non-indepth mode.
+	IndepthLines   int
+	IndepthFiles   int
+	IndepthCommits int
 }

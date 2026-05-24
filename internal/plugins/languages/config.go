@@ -36,6 +36,17 @@ type Config struct {
 	// "owner", "collaborator", "organization_member". Defaults to
 	// ["owner"].
 	RepoAffiliations []string `koanf:"repo_affiliations"`
+	// CommitsAuthoring is the list of author-identity patterns that
+	// identify commits authored by the target user. Mirrors upstream's
+	// base.commits_authoring. Each entry is one of:
+	//   - ".user.login" → the user's GitHub login (matched against
+	//     Author.Name plus the two noreply-email forms);
+	//   - a literal email address (matched against Author.Email,
+	//     case-insensitive);
+	//   - a literal login (matched against Author.Name, case-insensitive).
+	// Only consulted by the indepth path; the GraphQL path uses GitHub's
+	// pre-computed per-repo aggregates which already reflect ownership.
+	CommitsAuthoring []string `koanf:"commits_authoring"`
 }
 
 // defaultConfig returns the documented defaults for the languages plugin so
