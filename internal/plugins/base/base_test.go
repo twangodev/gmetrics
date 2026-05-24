@@ -2,9 +2,11 @@ package base
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -139,4 +141,160 @@ func TestFetch_PopulatesUser(t *testing.T) {
 
 	require.Equal(t, []string{"header", "activity", "community", "repositories", "metadata"}, data.Sections)
 	require.NotEmpty(t, data.Metadata.GeneratedAt)
+}
+
+func TestBuildCommitSearchQuery(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		entry string
+		login string
+		want  string
+	}{
+		{"placeholder", ".user.login", "alice", "author:alice"},
+		{"at-prefix-login", "@alice", "alice", "author:alice"},
+		{"plain-login-match", "alice", "alice", "author:alice"},
+		{"case-insensitive-login", "ALICE", "alice", "author:alice"},
+		{"github-noreply-email", "12+alice@users.noreply.github.com", "alice", "author-email:12+alice@users.noreply.github.com"},
+		{"plain-email", "james@fish.audio", "alice", "author-email:james@fish.audio"},
+		{"empty-entry", "", "alice", ""},
+		{"placeholder-no-login", ".user.login", "", ""},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := buildCommitSearchQuery(tc.entry, tc.login, strings.ToLower(tc.login))
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestPopulateAuthoredCommitCount_SumsAndReplaces(t *testing.T) {
+	t.Parallel()
+
+	// Stub server: returns total_count keyed off the q= query string.
+	// Tracks the queries it received so we can assert each pattern was
+	// translated correctly.
+	var (
+		mu      sync.Mutex
+		queries []string
+	)
+	totals := map[string]int{
+		"author:alice": 100,
+		"author-email:12+alice@users.noreply.github.com": 200,
+		"author-email:james@fish.audio":                  300,
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("q")
+		mu.Lock()
+		queries = append(queries, q)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"total_count": %d, "incomplete_results": false, "items": []}`, totals[q])
+	}))
+	t.Cleanup(srv.Close)
+
+	clients, err := githubapi.New(context.Background(), githubapi.Config{
+		Token:       "ghp_dummy",
+		RESTBaseURL: srv.URL + "/",
+	})
+	require.NoError(t, err)
+
+	env := &plugin.Env{Login: "alice", REST: clients.REST}
+	cfg := defaultConfig()
+	cfg.CommitsAuthoring = []string{
+		".user.login",
+		"12+alice@users.noreply.github.com",
+		"james@fish.audio",
+	}
+
+	d := Data{Activity: Activity{Commits: 50}}
+	require.NoError(t, populateAuthoredCommitCount(context.Background(), env, cfg, "alice", &d))
+
+	require.Equal(t, 600, d.Activity.AuthoredCommits)
+	require.Equal(t, 600, d.Activity.Commits, "Commits should be replaced by the search total")
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, queries, 3)
+	// Each query string is URL-decoded by net/url; assert the three expected forms.
+	want := map[string]bool{
+		"author:alice": true,
+		"author-email:12+alice@users.noreply.github.com": true,
+		"author-email:james@fish.audio":                  true,
+	}
+	for _, q := range queries {
+		// net/url decodes "+" to space (form encoding). Restore the
+		// literal "+" so the noreply-email query compares equal.
+		q = strings.ReplaceAll(q, " ", "+")
+		require.True(t, want[q], "unexpected query: %q", q)
+	}
+}
+
+func TestPopulateAuthoredCommitCount_FailureLeavesCommitsUnchanged(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+
+	clients, err := githubapi.New(context.Background(), githubapi.Config{
+		Token:       "ghp_dummy",
+		RESTBaseURL: srv.URL + "/",
+	})
+	require.NoError(t, err)
+
+	env := &plugin.Env{Login: "alice", REST: clients.REST}
+	cfg := defaultConfig()
+	cfg.CommitsAuthoring = []string{".user.login"}
+
+	d := Data{Activity: Activity{Commits: 77}}
+	err = populateAuthoredCommitCount(context.Background(), env, cfg, "alice", &d)
+	require.Error(t, err)
+	require.Equal(t, 77, d.Activity.Commits, "Commits should be unchanged on failure")
+	require.Equal(t, 0, d.Activity.AuthoredCommits)
+}
+
+func TestPopulateAuthoredCommitCount_CapsPatterns(t *testing.T) {
+	t.Parallel()
+
+	var (
+		mu    sync.Mutex
+		callN int
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		callN++
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"total_count": 1, "incomplete_results": false, "items": []}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	clients, err := githubapi.New(context.Background(), githubapi.Config{
+		Token:       "ghp_dummy",
+		RESTBaseURL: srv.URL + "/",
+	})
+	require.NoError(t, err)
+
+	env := &plugin.Env{Login: "alice", REST: clients.REST}
+	cfg := defaultConfig()
+	// Seven patterns; cap is 5.
+	cfg.CommitsAuthoring = []string{
+		"a@example.com", "b@example.com", "c@example.com",
+		"d@example.com", "e@example.com", "f@example.com",
+		"g@example.com",
+	}
+
+	d := Data{}
+	require.NoError(t, populateAuthoredCommitCount(context.Background(), env, cfg, "alice", &d))
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Equal(t, maxAuthoringPatterns, callN)
+	require.Equal(t, maxAuthoringPatterns, d.Activity.AuthoredCommits)
 }
