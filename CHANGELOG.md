@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.1](https://github.com/twangodev/gmetrics/compare/v1.0.0...v1.0.1) (2026-05-24)
+
+
+### Bug Fixes
+
+* **ci:** coerce release_created to boolean literal for docker tag enable ([ac1af46](https://github.com/twangodev/gmetrics/commit/ac1af46e5be369e573c4ff8498eba0a387496255))
+* **ci:** use softprops/action-gh-release for asset upload ([112749f](https://github.com/twangodev/gmetrics/commit/112749fa8d54ad8c8f890e2c9838a85d90379445))
+
 ## 1.0.0 (2026-05-24)
 
 
