@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/shurcooL/githubv4"
+	"github.com/twangodev/gmetrics/internal/img"
 	"github.com/twangodev/gmetrics/internal/plugin"
 )
 
@@ -56,6 +57,10 @@ type baseQuery struct {
 			TotalCount     githubv4.Int
 			TotalDiskUsage githubv4.Int
 		} `graphql:"repositories(first: 0, ownerAffiliations: $affiliations)"`
+
+		RepositoriesContributedTo struct {
+			TotalCount githubv4.Int
+		} `graphql:"repositoriesContributedTo(first: 0, includeUserRepositories: false, contributionTypes: [COMMIT, PULL_REQUEST, ISSUE, REPOSITORY])"`
 
 		ContributionsCollection struct {
 			TotalCommitContributions            githubv4.Int
@@ -134,6 +139,8 @@ func Fetch(ctx context.Context, env *plugin.Env, cfg Config) (Data, error) {
 		Comments:     int(q.User.IssueComments.TotalCount),
 	}
 
+	d.ContributedTo = int(q.User.RepositoriesContributedTo.TotalCount)
+
 	d.Community = Community{
 		Orgs:      int(q.User.Organizations.TotalCount),
 		Following: int(q.User.Following.TotalCount),
@@ -145,11 +152,45 @@ func Fetch(ctx context.Context, env *plugin.Env, cfg Config) (Data, error) {
 	d.Repositories = Repositories{
 		Count: int(q.User.Repositories.TotalCount),
 		Disk:  int(q.User.Repositories.TotalDiskUsage),
-		// Releases, Packages, Forks, Watchers, Stargazers require additional
-		// REST/GraphQL queries that are stretch goals for v1. Leave zero.
+		// Packages is not exposed by GraphQL for arbitrary users (would need
+		// a REST call to /users/:login/packages with read:packages scope);
+		// leave it at zero. The remaining aggregates are populated below by
+		// paginating the repositories collection.
+	}
+
+	// Aggregate per-repo stats (Forks, Stargazers, Watchers, Releases,
+	// License) by walking the user's repositories. A failure here is
+	// non-fatal: we log and leave the fields at zero so the rest of the
+	// card still renders.
+	if err := populateRepoStats(ctx, env, cfg, affiliations, login, &d); err != nil {
+		if env.Log != nil {
+			env.Log.Warn("base: repo stats aggregation failed", "err", err)
+		}
+	}
+
+	// When indepth is enabled, replace the trailing-year activity counts
+	// with totals summed across the user's entire GitHub lifetime via the
+	// contributionsCollection's date-window form (max 1 year per query).
+	// A failure here is non-fatal: we log and keep the last-year values.
+	if cfg.Indepth {
+		if err := populateIndepthContributions(ctx, env, login, q.User.CreatedAt.Time, &d); err != nil {
+			if env.Log != nil {
+				env.Log.Warn("base: indepth contributions aggregation failed", "err", err)
+			}
+		}
 	}
 
 	d.Calendar = lastNDays(q, 14)
+
+	// Fetch and base64-embed the avatar so the SVG is self-contained and
+	// survives GitHub's Camo proxy. Tests pass env.HTTP == nil to skip this.
+	if env.HTTP != nil && d.User.AvatarURL != "" {
+		if b64, err := img.FetchAvatar(ctx, env.HTTP, d.User.AvatarURL); err == nil {
+			d.AvatarB64 = b64
+		} else if env.Log != nil {
+			env.Log.Warn("base: avatar fetch failed", "err", err)
+		}
+	}
 
 	return d, nil
 }
@@ -171,6 +212,262 @@ func toRepositoryAffiliations(raw []string) []githubv4.RepositoryAffiliation {
 		}
 	}
 	return out
+}
+
+// repoStatsQuery walks the user's repositories one page at a time to
+// aggregate per-repo counters (forks, stars, watchers, releases) and the
+// licenseInfo.spdxId distribution. The collection is filtered server-side
+// by ownerAffiliations and (optionally) isFork; the includeForks flag is
+// driven by cfg.Repos.Forks.
+type repoStatsQuery struct {
+	User struct {
+		Repositories struct {
+			Nodes []struct {
+				ForkCount      githubv4.Int
+				StargazerCount githubv4.Int
+				IsFork         githubv4.Boolean
+				Watchers       struct{ TotalCount githubv4.Int }
+				Releases       struct{ TotalCount githubv4.Int }
+				LicenseInfo    struct {
+					SpdxID githubv4.String `graphql:"spdxId"`
+				}
+			}
+			PageInfo struct {
+				HasNextPage githubv4.Boolean
+				EndCursor   githubv4.String
+			}
+		} `graphql:"repositories(first: $batch, after: $after, ownerAffiliations: $affiliations, isFork: $includeForks)"`
+	} `graphql:"user(login: $login)"`
+}
+
+// populateRepoStats paginates over the user's repositories using
+// cfg.Repos.Batch as the page size, capping the total number of repos
+// inspected at cfg.Repos.Max. It mutates d.Repositories in place with the
+// aggregated values. Returns nil if cfg.Repos.Max == 0 (caller opted out).
+//
+// License selection picks the most common spdxId across the inspected
+// repos; ties are broken by first-encountered order (insertion order in
+// the licenseOrder slice).
+func populateRepoStats(
+	ctx context.Context,
+	env *plugin.Env,
+	cfg Config,
+	affiliations []githubv4.RepositoryAffiliation,
+	login string,
+	d *Data,
+) error {
+	if cfg.Repos.Max == 0 {
+		return nil
+	}
+
+	batch := cfg.Repos.Batch
+	if batch <= 0 {
+		batch = 100
+	}
+	if batch > cfg.Repos.Max {
+		batch = cfg.Repos.Max
+	}
+
+	// For per-repo aggregates (stars / forks / watchers / releases /
+	// license) we deliberately scope to OWNER only — including
+	// collaborator/org-member repos would attribute their stars/watchers
+	// to this user (e.g. a popular org repo with 1k stars would add 1k
+	// stars per member). Upstream's classic template makes the same call.
+	ownerOnly := []githubv4.RepositoryAffiliation{githubv4.RepositoryAffiliationOwner}
+	_ = affiliations // affiliations is honored by the top-level counts; aggregates use ownerOnly
+	vars := map[string]any{
+		"login":        githubv4.String(login),
+		"affiliations": ownerOnly,
+		"batch":        githubv4.Int(batch),
+		"after":        (*githubv4.String)(nil),
+		"includeForks": (*githubv4.Boolean)(nil),
+	}
+	// includeForks is a nullable Boolean: nil means "no filter" (include
+	// forks), false means "exclude forks". The default upstream behavior
+	// excludes forks unless cfg.Repos.Forks is true.
+	if !cfg.Repos.Forks {
+		vars["includeForks"] = githubv4.NewBoolean(githubv4.Boolean(false))
+	}
+
+	var (
+		forks, stars, watchers, releases int
+		seen                             int
+		licenseCounts                    = map[string]int{}
+		licenseOrder                     []string
+	)
+
+	// pageGuard protects against an API that reports HasNextPage
+	// indefinitely. cfg.Repos.Max / batch rounded up is the natural cap;
+	// add a small fudge factor in case the API returns short pages.
+	pageGuard := (cfg.Repos.Max/batch)*2 + 4
+
+	for pageGuard > 0 {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		pageGuard--
+
+		// Shrink the page size on the final page so we don't fetch more
+		// than cfg.Repos.Max repos overall.
+		remaining := cfg.Repos.Max - seen
+		if remaining <= 0 {
+			break
+		}
+		if remaining < batch {
+			vars["batch"] = githubv4.Int(remaining)
+		} else {
+			vars["batch"] = githubv4.Int(batch)
+		}
+
+		var q repoStatsQuery
+		if err := env.GraphQL.Query(ctx, &q, vars); err != nil {
+			return fmt.Errorf("base: repo stats graphql: %w", err)
+		}
+
+		for _, repo := range q.User.Repositories.Nodes {
+			forks += int(repo.ForkCount)
+			stars += int(repo.StargazerCount)
+			watchers += int(repo.Watchers.TotalCount)
+			releases += int(repo.Releases.TotalCount)
+			if spdx := string(repo.LicenseInfo.SpdxID); spdx != "" {
+				if _, ok := licenseCounts[spdx]; !ok {
+					licenseOrder = append(licenseOrder, spdx)
+				}
+				licenseCounts[spdx]++
+			}
+			seen++
+			if seen >= cfg.Repos.Max {
+				break
+			}
+		}
+
+		if seen >= cfg.Repos.Max {
+			break
+		}
+		if !bool(q.User.Repositories.PageInfo.HasNextPage) {
+			break
+		}
+		vars["after"] = githubv4.NewString(q.User.Repositories.PageInfo.EndCursor)
+	}
+
+	d.Repositories.Forks = forks
+	d.Repositories.Stargazers = stars
+	d.Repositories.Watchers = watchers
+	d.Repositories.Releases = releases
+
+	// Pick the most common license; tie-break by first-encountered order.
+	if len(licenseOrder) > 0 {
+		best := licenseOrder[0]
+		bestN := licenseCounts[best]
+		for _, spdx := range licenseOrder[1:] {
+			if licenseCounts[spdx] > bestN {
+				best = spdx
+				bestN = licenseCounts[spdx]
+			}
+		}
+		d.Repositories.License = best
+	}
+
+	return nil
+}
+
+// indepthContribQuery is a minimal contributions-only query used to sum
+// activity counts across a date window. The window is bound via the
+// $from and $to variables (both DateTime, max 1 year apart).
+type indepthContribQuery struct {
+	User struct {
+		ContributionsCollection struct {
+			TotalCommitContributions            githubv4.Int
+			TotalPullRequestContributions       githubv4.Int
+			TotalPullRequestReviewContributions githubv4.Int
+			TotalIssueContributions             githubv4.Int
+		} `graphql:"contributionsCollection(from: $from, to: $to)"`
+	} `graphql:"user(login: $login)"`
+}
+
+// maxIndepthWindows caps the number of year-long windows we will query when
+// summing indepth contributions. GitHub was founded in 2008, so even the
+// oldest accounts top out around ~18-19 windows; 20 leaves headroom for
+// clock skew and a fresh today vs. CreatedAt edge case.
+const maxIndepthWindows = 20
+
+// populateIndepthContributions sums activity counts (commits, PRs opened,
+// PRs reviewed, issues opened) across the user's entire history by walking
+// 1-year windows from `now` backwards to createdAt. The summed totals
+// replace d.Activity.{Commits,PRsOpened,PRsReviewed,IssuesOpened}.
+//
+// Errors from individual windows abort the loop and the caller leaves the
+// last-year values intact (no partial overwrite).
+func populateIndepthContributions(
+	ctx context.Context,
+	env *plugin.Env,
+	login string,
+	createdAt time.Time,
+	d *Data,
+) error {
+	if createdAt.IsZero() {
+		return fmt.Errorf("base: createdAt is zero, cannot compute indepth window")
+	}
+
+	var (
+		commits     int
+		prsOpened   int
+		prsReviewed int
+		issues      int
+	)
+
+	now := time.Now().UTC()
+	to := now
+	from := to.AddDate(-1, 0, 0)
+	if from.Before(createdAt) {
+		from = createdAt
+	}
+
+	for i := 0; i < maxIndepthWindows; i++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		vars := map[string]any{
+			"login": githubv4.String(login),
+			"from":  githubv4.DateTime{Time: from},
+			"to":    githubv4.DateTime{Time: to},
+		}
+
+		var q indepthContribQuery
+		if err := env.GraphQL.Query(ctx, &q, vars); err != nil {
+			return fmt.Errorf("base: indepth graphql (from=%s to=%s): %w",
+				from.Format(time.RFC3339), to.Format(time.RFC3339), err)
+		}
+
+		commits += int(q.User.ContributionsCollection.TotalCommitContributions)
+		prsOpened += int(q.User.ContributionsCollection.TotalPullRequestContributions)
+		prsReviewed += int(q.User.ContributionsCollection.TotalPullRequestReviewContributions)
+		issues += int(q.User.ContributionsCollection.TotalIssueContributions)
+
+		// Once we've covered back to the account's creation, stop.
+		if !from.After(createdAt) {
+			break
+		}
+
+		// Advance the window backwards by 1 year.
+		to = from
+		from = to.AddDate(-1, 0, 0)
+		if from.Before(createdAt) {
+			from = createdAt
+		}
+	}
+
+	d.Activity.Commits = commits
+	d.Activity.PRsOpened = prsOpened
+	d.Activity.PRsReviewed = prsReviewed
+	d.Activity.IssuesOpened = issues
+
+	return nil
 }
 
 // lastNDays flattens the (weeks → days) contribution calendar produced by
