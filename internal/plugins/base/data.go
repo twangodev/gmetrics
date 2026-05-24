@@ -12,6 +12,12 @@ type Activity struct {
 	PRsReviewed  int
 	IssuesOpened int
 	Comments     int
+	// AuthoredCommits is the sum of commit-search totals across the
+	// configured commits_authoring patterns. Populated only when
+	// cfg.CommitsAuthoring is non-empty and the REST search succeeded.
+	// When populated, it replaces Commits (the per-pattern search is the
+	// more accurate count for users with multiple email identities).
+	AuthoredCommits int
 }
 
 // Community holds the social-graph counts surfaced in the "community"
@@ -51,12 +57,14 @@ type Metadata struct {
 
 // Data is the value Fetch returns and Render consumes.
 type Data struct {
-	User         plugin.UserContext
-	Activity     Activity
-	Community    Community
-	Repositories Repositories
-	Calendar     []DayCount
-	Metadata     Metadata
-	Sections     []string
-	Hireable     bool
+	User          plugin.UserContext
+	AvatarB64     string // data: URL for the user's avatar; empty if fetch failed or env.HTTP was nil
+	Activity      Activity
+	Community     Community
+	Repositories  Repositories
+	Calendar      []DayCount
+	Metadata      Metadata
+	Sections      []string
+	Hireable      bool
+	ContributedTo int // count of external repositories the user has contributed to (PRs/issues/commits/repos)
 }
