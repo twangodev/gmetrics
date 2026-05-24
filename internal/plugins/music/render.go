@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/tdewolff/canvas"
 	"github.com/twangodev/gmetrics/internal/plugin"
+	"github.com/twangodev/gmetrics/internal/render"
 )
 
 // fragmentWidth is the working width every plugin draws against. It
@@ -15,53 +17,79 @@ import (
 // constant).
 const fragmentWidth = 440
 
-// Vertical metrics for the music card. Header is rendered as a single
-// 14pt bold text line; each track row is 40px tall (32px artwork + 4px
-// breathing room top/bottom) with a fixed gap between rows. These
-// constants are also used to compute the final fragment height, which
+// Vertical metrics. The header band now mirrors upstream metrics's classic
+// template: a 16px regular h2 ("♪ Recently played") followed by a 14px
+// regular h3 ("From Last.fm"). Each row remains 40px tall (32px artwork
+// plus 4px breathing room top and bottom) with a fixed gap between rows.
+// These constants are also used to compute the final fragment height, which
 // must be exact for the frame composer to position adjacent fragments
 // correctly.
 const (
-	headerHeight = 28
-	rowHeight    = 40
-	artworkSize  = 32
-	textIndent   = artworkSize + 12 // 12px gap between artwork and text
+	h2BaselineY = 16
+	h3BaselineY = 36
+	headerBlock = 48 // h2 + h3 + small gap before the first track row
+	rowHeight   = 40
+	artworkSize = 32
+	textIndent  = artworkSize + 12 // 12px gap between artwork and text
+	iconSize    = 16
+	iconGutter  = 8 // gap between the leading h2/h3 icon and its label
 )
 
-// Render lays out the music card: a "Recently Played · Last.fm" header
-// followed by one row per track. Each row draws the artwork (or a
-// placeholder rectangle when none is available) on the left and a stack
-// of track name / artist / played-at text on the right.
+// Render lays out the music card: an h2 + h3 header pair followed by one
+// row per track. The header mirrors upstream lowlighter/metrics's classic
+// template — a music-note icon next to "Recently played" (h2), with a
+// "From <Provider>" subheader below in a smaller, muted face.
 func (*Plugin) Render(env *plugin.Env, raw any) (plugin.Fragment, error) {
 	data, ok := raw.(Data)
 	if !ok {
 		return plugin.Fragment{}, fmt.Errorf("music: render: want Data, got %T", raw)
 	}
 
-	var buf bytes.Buffer
-
-	// Header: "Recently Played · Last.fm" at 14pt bold. We use the same
-	// baseline-at-18 convention as the people plugin so the header band
-	// has comparable visual weight across cards.
-	title := headerTitle(data)
-	fmt.Fprintf(&buf,
-		`<text x="0" y="18" font-size="14" font-weight="600" fill="var(--color-text)">%s</text>`,
-		xmlEscape(title),
-	)
-
-	// Track rows. Each row occupies rowHeight; the per-row layout already
-	// includes its top/bottom breathing room so adjacent rows can sit
-	// flush. The +8 at the bottom (added below) matches the spec's height
-	// formula and gives the final row visual separation from whatever
-	// fragment follows.
-	for i, t := range data.Tracks {
-		y := headerHeight + i*rowHeight
-		writeRow(&buf, t, y)
+	// Build all font faces once. Upstream's classic CSS pins h2 at 16px
+	// regular, h3 at 14px regular, the track name at 14px semibold and the
+	// artist/played-at lines at ~12px regular muted. We approximate
+	// "semibold" with our bundled Bold face, which is the only bold variant
+	// shipped with the Inter subset.
+	h2Face, err := render.Face(16, canvas.FontRegular)
+	if err != nil {
+		return plugin.Fragment{}, fmt.Errorf("music: load h2 face: %w", err)
+	}
+	h3Face, err := render.Face(12, canvas.FontRegular)
+	if err != nil {
+		return plugin.Fragment{}, fmt.Errorf("music: load h3 face: %w", err)
+	}
+	trackNameFace, err := render.Face(12, canvas.FontBold)
+	if err != nil {
+		return plugin.Fragment{}, fmt.Errorf("music: load track-name face: %w", err)
+	}
+	artistFace, err := render.Face(11, canvas.FontRegular)
+	if err != nil {
+		return plugin.Fragment{}, fmt.Errorf("music: load artist face: %w", err)
+	}
+	playedAtFace, err := render.Face(11, canvas.FontRegular)
+	if err != nil {
+		return plugin.Fragment{}, fmt.Errorf("music: load played-at face: %w", err)
 	}
 
-	// Height formula taken verbatim from the spec:
-	//   28 (header) + len(Tracks) * 40 (row) + 8 (trailing pad).
-	height := headerHeight + len(data.Tracks)*rowHeight + 8
+	var buf bytes.Buffer
+
+	// h2: "<music-note> Recently played" in the heading color.
+	render.EmitOcticon(&buf, 0, 0, iconSize, "music-note", "#0366d6")
+	render.EmitTextPathClass(&buf, iconSize+iconGutter, h2BaselineY, modeLabel(data.Mode), h2Face, "text-heading")
+
+	// h3: "<broadcast> From <Provider>" muted, smaller.
+	render.EmitOcticon(&buf, 0, h3BaselineY-iconSize+2, iconSize, "broadcast", "#959da5")
+	render.EmitTextPathClass(&buf, iconSize+iconGutter, h3BaselineY, "From "+providerLabel(data.Provider), h3Face, "text-muted")
+
+	// Track rows. The first row starts directly below the header block; the
+	// per-row layout already includes top/bottom breathing room so rows can
+	// sit flush against each other.
+	for i, t := range data.Tracks {
+		y := headerBlock + i*rowHeight
+		writeRow(&buf, t, y, trackNameFace, artistFace, playedAtFace)
+	}
+
+	height := headerBlock + len(data.Tracks)*rowHeight + 8
 
 	return plugin.Fragment{
 		Body:   buf.String(),
@@ -70,38 +98,50 @@ func (*Plugin) Render(env *plugin.Env, raw any) (plugin.Fragment, error) {
 	}, nil
 }
 
-// headerTitle composes the section header. Mode and Provider come from
-// Data so the same renderer can in principle handle other modes/providers
-// later without touching Config plumbing. The v1 scope only ever feeds
-// "recent" + "lastfm", giving "Recently Played · Last.fm".
-func headerTitle(d Data) string {
-	mode := "Recently Played"
-	switch d.Mode {
-	case "recent":
-		mode = "Recently Played"
+// modeLabel returns the user-facing string for the upstream "mode" field.
+// v1 only ships "recent" but we keep the switch so adding a new mode is a
+// trivial edit instead of a wider refactor.
+func modeLabel(mode string) string {
+	switch mode {
 	case "top":
-		mode = "Top Played"
+		return "Top played"
 	case "playlist":
-		mode = "Playlist"
+		return "Playlist"
+	case "recent":
+		fallthrough
+	default:
+		return "Recently played"
 	}
-	provider := "Last.fm"
-	switch d.Provider {
+}
+
+// providerLabel formats the provider key for display. The Last.fm name is
+// the only provider with internal capitalisation, but Spotify/Apple/YouTube
+// are listed here too so future modes pick up the same display strings.
+func providerLabel(p string) string {
+	switch p {
 	case "lastfm":
-		provider = "Last.fm"
+		return "Last.fm"
 	case "spotify":
-		provider = "Spotify"
+		return "Spotify"
 	case "apple":
-		provider = "Apple Music"
+		return "Apple Music"
 	case "youtube":
-		provider = "YouTube Music"
+		return "YouTube Music"
+	default:
+		// Capitalise the first rune as a safe fallback so unknown providers
+		// at least render as a Title-Case word rather than the raw lower
+		// identifier.
+		if p == "" {
+			return ""
+		}
+		return strings.ToUpper(p[:1]) + p[1:]
 	}
-	return fmt.Sprintf("%s · %s", mode, provider)
 }
 
 // writeRow emits one track row at the given y offset. The artwork is an
 // <image> when the base64 URL is non-empty, otherwise a muted rectangle
 // the same size so the layout doesn't shift in test mode (env.HTTP nil).
-func writeRow(buf *bytes.Buffer, t Track, y int) {
+func writeRow(buf *bytes.Buffer, t Track, y int, nameFace, artistFace, playedFace *canvas.FontFace) {
 	fmt.Fprintf(buf, `<g class="music-row" transform="translate(0,%d)">`, y)
 
 	// Artwork
@@ -112,29 +152,22 @@ func writeRow(buf *bytes.Buffer, t Track, y int) {
 		)
 	} else {
 		fmt.Fprintf(buf,
-			`<rect x="0" y="0" width="%d" height="%d" rx="4" fill="var(--color-border)"><title>%s</title></rect>`,
+			`<rect x="0" y="0" width="%d" height="%d" rx="4" fill="#d0d7de"><title>%s</title></rect>`,
 			artworkSize, artworkSize, xmlEscape(t.Name),
 		)
 	}
 
 	// Track name: 12pt bold, baseline at 12 so the descender doesn't
 	// collide with the artist line below.
-	fmt.Fprintf(buf,
-		`<text x="%d" y="12" font-size="12" font-weight="600" fill="var(--color-text)">%s</text>`,
-		textIndent, xmlEscape(t.Name),
-	)
+	render.EmitTextPath(buf, textIndent, 12, t.Name, nameFace)
 	// Artist: 11pt muted, baseline at 24.
-	fmt.Fprintf(buf,
-		`<text x="%d" y="24" font-size="11" fill="var(--color-muted)">%s</text>`,
-		textIndent, xmlEscape(t.Artist),
-	)
-	// PlayedAt: 10pt muted, baseline at 35. Skipped when empty so we
-	// don't emit a stray empty <text/> for tracks without timestamps.
+	render.EmitTextPathClass(buf, textIndent, 24, t.Artist, artistFace, "text-muted")
+	// PlayedAt: muted, baseline at 35. Skipped when empty so we don't emit
+	// a stray empty <path/> for tracks without timestamps. (EmitTextPath
+	// already short-circuits on empty input but checking up front keeps
+	// the intent explicit.)
 	if t.PlayedAt != "" {
-		fmt.Fprintf(buf,
-			`<text x="%d" y="35" font-size="10" fill="var(--color-muted)">%s</text>`,
-			textIndent, xmlEscape(t.PlayedAt),
-		)
+		render.EmitTextPathClass(buf, textIndent, 35, t.PlayedAt, playedFace, "text-muted")
 	}
 
 	fmt.Fprint(buf, `</g>`)

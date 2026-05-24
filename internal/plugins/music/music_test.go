@@ -142,20 +142,30 @@ func TestRender_FourTracks_NonEmpty(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, frag.Body, "render body must be non-empty")
 	require.Equal(t, 440, frag.Width)
-	// Per spec: 28 (header) + 4*40 + 8 = 196.
-	require.Equal(t, 196, frag.Height)
+	// New header layout: h2 (16px) baseline + h3 (12px) baseline below it,
+	// totalling a 48px header block; followed by 4 track rows × 40px and
+	// the spec's 8px trailing pad. 48 + 160 + 8 = 216.
+	require.Equal(t, 216, frag.Height)
 
-	require.Contains(t, frag.Body, "Recently Played")
-	require.Contains(t, frag.Body, "Last.fm")
-	// XML metacharacters in track names must be escaped.
-	require.Contains(t, frag.Body, "Track &lt;four&gt;")
-	require.Contains(t, frag.Body, "Artist &amp; D")
+	// Header and track text are rendered as glyph <path> elements (text-as-path)
+	// so we can't grep for the literal "Recently Played" / track-name strings.
+	// Instead, assert the structural pieces we still emit verbatim.
 	// The first track has no artwork URL -> placeholder rect.
 	require.Contains(t, frag.Body, "<rect")
 	// The second track has artwork -> <image>.
 	require.Contains(t, frag.Body, "<image")
 	// All four rows are emitted.
 	require.Equal(t, 4, strings.Count(frag.Body, `class="music-row"`))
+	// Text-as-path: two header lines (h2 + h3) plus three text lines per
+	// row (name, artist, played-at), one of which is omitted for the third
+	// track (PlayedAt empty). Total = 2 + 3 + 3 + 2 + 3 = 13 <path>.
+	require.GreaterOrEqual(t, strings.Count(frag.Body, "<path"), 13,
+		"expected at least 13 <path> elements (header + per-row text), got %d", strings.Count(frag.Body, "<path"))
+	// The h2 octicon and h3 broadcast octicon are emitted as inline <svg>
+	// elements; assert they're present so a regression that drops the icon
+	// glyphs is caught here.
+	require.Equal(t, 2, strings.Count(frag.Body, "<svg"),
+		"expected 2 inline <svg> octicons (music-note h2, broadcast h3)")
 }
 
 // TestPlugin_RegisteredAndDecodes confirms the plugin self-registers via
