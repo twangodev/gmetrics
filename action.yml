@@ -1,4 +1,4 @@
-name: gmetrics
+name: gmetrics-action
 description: Generate GitHub stats SVG infographics (Go port of lowlighter/metrics)
 author: gmetrics contributors
 
