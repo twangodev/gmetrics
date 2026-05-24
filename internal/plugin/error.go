@@ -14,8 +14,8 @@ func ErrorFragment(pluginName string, err error) Fragment {
 	name := xmlEscape(pluginName)
 	msg := xmlEscape(err.Error())
 	body := fmt.Sprintf(`<g class="plugin-error" data-plugin="%s">
-  <rect x="0" y="0" width="440" height="40" rx="6" fill="var(--color-error-bg)"/>
-  <text x="12" y="24" fill="var(--color-error)" font-size="12">⚠ %s: %s</text>
+  <rect class="bg-error" x="0" y="0" width="440" height="40" rx="6"/>
+  <text class="text-error" x="12" y="24" font-size="12">⚠ %s: %s</text>
 </g>`, name, name, msg)
 	return Fragment{Body: body, Width: 440, Height: 40}
 }
