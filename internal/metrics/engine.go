@@ -64,7 +64,7 @@ func (e *Engine) Render(ctx context.Context, cfg *config.Config) ([]plugin.Fragm
 	frags := make([]plugin.Fragment, 0, 6)
 
 	// 1. Base plugin (sequential — populates Env.User used by other plugins).
-	baseFrag, err := e.runBase(ctx, cfg)
+	baseFrag, baseData, err := e.runBase(ctx, cfg)
 	if err != nil {
 		// Only reachable in strict mode; non-strict always returns a
 		// graceful error fragment instead.
@@ -117,7 +117,25 @@ func (e *Engine) Render(ctx context.Context, cfg *config.Config) ([]plugin.Fragm
 		frags = append(frags, frag)
 	}
 
+	// Metadata footer: appended last so it sits below every plugin.
+	if includesSection(cfg.Base.Sections, "metadata") && baseData != nil {
+		if metaFrag, err := base.MetadataFragment(baseData); err == nil && metaFrag.Body != "" {
+			frags = append(frags, metaFrag)
+		} else if err != nil {
+			e.Env.Log.Warn("metadata render failed", "err", err)
+		}
+	}
+
 	return frags, nil
+}
+
+func includesSection(xs []string, s string) bool {
+	for _, x := range xs {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }
 
 // runBase fetches + renders the base plugin and (on success) populates
@@ -126,15 +144,15 @@ func (e *Engine) Render(ctx context.Context, cfg *config.Config) ([]plugin.Fragm
 // mode errors are logged and a graceful error fragment is substituted so the
 // rest of the card still renders; the returned error is always nil in that
 // path.
-func (e *Engine) runBase(ctx context.Context, cfg *config.Config) (plugin.Fragment, error) {
+func (e *Engine) runBase(ctx context.Context, cfg *config.Config) (plugin.Fragment, any, error) {
 	bp, ok := plugin.Lookup("base")
 	if !ok {
 		err := fmt.Errorf("base plugin not registered")
 		if e.Strict {
-			return plugin.Fragment{}, err
+			return plugin.Fragment{}, nil, err
 		}
 		e.Env.Log.Error("base plugin not registered")
-		return plugin.ErrorFragment("base", err), nil
+		return plugin.ErrorFragment("base", err), nil, nil
 	}
 
 	baseCfg := base.Config{
@@ -153,10 +171,10 @@ func (e *Engine) runBase(ctx context.Context, cfg *config.Config) (plugin.Fragme
 	data, err := bp.Fetch(ctx, e.Env, baseCfg)
 	if err != nil {
 		if e.Strict {
-			return plugin.Fragment{}, fmt.Errorf("plugin base: %w", err)
+			return plugin.Fragment{}, nil, fmt.Errorf("plugin base: %w", err)
 		}
 		e.Env.Log.Error("base fetch failed", "err", err)
-		return plugin.ErrorFragment("base", err), nil
+		return plugin.ErrorFragment("base", err), nil, nil
 	}
 
 	// Populate Env.User for downstream plugins. Per the locked API, the
@@ -168,12 +186,12 @@ func (e *Engine) runBase(ctx context.Context, cfg *config.Config) (plugin.Fragme
 	frag, err := bp.Render(e.Env, data)
 	if err != nil {
 		if e.Strict {
-			return plugin.Fragment{}, fmt.Errorf("plugin base render: %w", err)
+			return plugin.Fragment{}, nil, fmt.Errorf("plugin base render: %w", err)
 		}
 		e.Env.Log.Error("base render failed", "err", err)
-		return plugin.ErrorFragment("base", err), nil
+		return plugin.ErrorFragment("base", err), nil, nil
 	}
-	return frag, nil
+	return frag, data, nil
 }
 
 // assembleRuns returns the deterministic, layout-ordered list of optional
@@ -198,6 +216,7 @@ func assembleRuns(cfg *config.Config, env *plugin.Env) []pluginRun {
 					Indepth:          lc.Indepth,
 					RepoBatch:        cfg.Base.Repositories.Batch,
 					RepoAffiliations: cfg.Base.Repositories.Affiliations,
+					CommitsAuthoring: cfg.Base.CommitsAuthoring,
 				},
 			})
 		} else {
@@ -222,6 +241,27 @@ func assembleRuns(cfg *config.Config, env *plugin.Env) []pluginRun {
 		}
 	}
 
+	// Music renders before WakaTime to mirror upstream's sidebar layout
+	// (Recently played → WakaTime → Steam).
+	if cfg.Plugins.Music.Enabled {
+		if p, ok := plugin.Lookup("music"); ok {
+			mc := cfg.Plugins.Music
+			runs = append(runs, pluginRun{
+				name: "music",
+				p:    p,
+				cfg: music.Config{
+					Provider: mc.Provider,
+					Mode:     mc.Mode,
+					User:     mc.User,
+					Token:    mc.Token,
+					Limit:    mc.Limit,
+				},
+			})
+		} else {
+			env.Log.Warn("plugin not registered", "plugin", "music")
+		}
+	}
+
 	if cfg.Plugins.Wakatime.Enabled {
 		if p, ok := plugin.Lookup("wakatime"); ok {
 			wc := cfg.Plugins.Wakatime
@@ -239,25 +279,6 @@ func assembleRuns(cfg *config.Config, env *plugin.Env) []pluginRun {
 			})
 		} else {
 			env.Log.Warn("plugin not registered", "plugin", "wakatime")
-		}
-	}
-
-	if cfg.Plugins.Music.Enabled {
-		if p, ok := plugin.Lookup("music"); ok {
-			mc := cfg.Plugins.Music
-			runs = append(runs, pluginRun{
-				name: "music",
-				p:    p,
-				cfg: music.Config{
-					Provider: mc.Provider,
-					Mode:     mc.Mode,
-					User:     mc.User,
-					Token:    mc.Token,
-					Limit:    mc.Limit,
-				},
-			})
-		} else {
-			env.Log.Warn("plugin not registered", "plugin", "music")
 		}
 	}
 

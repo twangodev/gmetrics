@@ -25,8 +25,8 @@ type fakePlugin struct {
 	renderFn func(env *plugin.Env, data any) (plugin.Fragment, error)
 }
 
-func (f fakePlugin) Name() string                                     { return f.name }
-func (f fakePlugin) DecodeConfig(map[string]any) (any, error)         { return nil, nil }
+func (f fakePlugin) Name() string                             { return f.name }
+func (f fakePlugin) DecodeConfig(map[string]any) (any, error) { return nil, nil }
 func (f fakePlugin) Fetch(ctx context.Context, env *plugin.Env, cfg any) (any, error) {
 	return f.fetch(ctx, env, cfg)
 }
