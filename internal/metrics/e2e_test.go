@@ -308,7 +308,7 @@ func TestE2E_FullPipelineGolden(t *testing.T) {
 		strings.HasPrefix(svg, `<svg xmlns="http://www.w3.org/2000/svg"`),
 		"composed SVG should start with the expected root element; got prefix %q", svg[:min(80, len(svg))])
 	require.Contains(t, svg, "<style>", "composed SVG should embed a <style> tag")
-	require.Contains(t, svg, "--color-text", "composed SVG should reference the --color-text CSS variable")
+	require.Contains(t, svg, ".text-h1", "composed SVG should include the h1 theme class")
 	require.Greater(t, len(svg), 1024, "composed SVG byte count should exceed 1 KB (got %d)", len(svg))
 
 	// Snapshot the composed SVG via goldie. Use a fixture dir under the
@@ -501,4 +501,3 @@ var onePixelPNG = []byte{
 	0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
 	0x42, 0x60, 0x82,
 }
-
