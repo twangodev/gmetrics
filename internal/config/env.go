@@ -71,6 +71,7 @@ var envMappings = map[string]envMapping{
 	"PLUGIN_LANGUAGES_LIMIT":          {"plugins.languages.limit", envInt},
 	"PLUGIN_LANGUAGES_OTHER":          {"plugins.languages.other", envBool},
 	"PLUGIN_LANGUAGES_INDEPTH":        {"plugins.languages.indepth", envBool},
+	"PLUGIN_LANGUAGES_INDEPTH_CACHE":  {"plugins.languages.indepth_cache", envString},
 	"PLUGIN_PEOPLE":                   {"plugins.people.enabled", envBool},
 	"PLUGIN_PEOPLE_TYPES":             {"plugins.people.types", envCSV},
 	"PLUGIN_PEOPLE_LIMIT":             {"plugins.people.limit", envInt},

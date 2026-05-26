@@ -66,6 +66,14 @@ func TestLoadFromEnv_BasicFields(t *testing.T) {
 	require.Equal(t, 12, cfg.Plugins.People.Limit)
 }
 
+func TestLoadFromEnv_LanguagesIndepthCache(t *testing.T) {
+	t.Setenv("INPUT_PLUGIN_LANGUAGES_INDEPTH_CACHE", ".cache/x.json")
+
+	cfg, err := config.LoadFromEnv(os.Environ())
+	require.NoError(t, err)
+	require.Equal(t, ".cache/x.json", cfg.Plugins.Languages.IndepthCache)
+}
+
 func TestLoadCombined_EnvOverridesFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "card.yaml")

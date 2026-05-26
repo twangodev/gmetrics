@@ -204,6 +204,10 @@ func assembleRuns(cfg *config.Config, env *plugin.Env) []pluginRun {
 	if cfg.Plugins.Languages.Enabled {
 		if p, ok := plugin.Lookup("languages"); ok {
 			lc := cfg.Plugins.Languages
+			cachePath := lc.IndepthCache
+			if lc.Indepth && cachePath == "" {
+				cachePath = ".gmetrics-cache/languages-indepth.json"
+			}
 			runs = append(runs, pluginRun{
 				name: "languages",
 				p:    p,
@@ -214,6 +218,7 @@ func assembleRuns(cfg *config.Config, env *plugin.Env) []pluginRun {
 					Limit:            lc.Limit,
 					Other:            lc.Other,
 					Indepth:          lc.Indepth,
+					IndepthCachePath: cachePath,
 					RepoBatch:        cfg.Base.Repositories.Batch,
 					RepoAffiliations: cfg.Base.Repositories.Affiliations,
 					CommitsAuthoring: cfg.Base.CommitsAuthoring,

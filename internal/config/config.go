@@ -56,13 +56,14 @@ type PluginsConfig struct {
 
 // LanguagesConfig configures the `languages` plugin.
 type LanguagesConfig struct {
-	Enabled  bool     `koanf:"enabled"`
-	Sections []string `koanf:"sections"`
-	Details  []string `koanf:"details"`
-	Ignored  []string `koanf:"ignored"`
-	Limit    int      `koanf:"limit"`
-	Other    bool     `koanf:"other"`
-	Indepth  bool     `koanf:"indepth"`
+	Enabled      bool     `koanf:"enabled"`
+	Sections     []string `koanf:"sections"`
+	Details      []string `koanf:"details"`
+	Ignored      []string `koanf:"ignored"`
+	Limit        int      `koanf:"limit"`
+	Other        bool     `koanf:"other"`
+	Indepth      bool     `koanf:"indepth"`
+	IndepthCache string   `koanf:"indepth_cache"`
 }
 
 // PeopleConfig configures the `people` plugin.
