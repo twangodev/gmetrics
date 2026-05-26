@@ -185,6 +185,13 @@ func fetchIndepth(ctx context.Context, env *plugin.Env, cfg Config) (Data, error
 			"count", len(tasks), "concurrency", indepthConcurrency)
 	}
 
+	ph := predHash(preds)
+	cache := loadCache(cfg.IndepthCachePath)
+	if cache.PredHash != ph {
+		cache = newCache(ph)
+	}
+	var cacheMu sync.Mutex
+
 	var mu sync.Mutex
 	bytes := map[string]int{}
 	var (
@@ -226,11 +233,22 @@ func fetchIndepth(ctx context.Context, env *plugin.Env, cfg Config) (Data, error
 		t := t
 		g.Go(func() error {
 			t0 := time.Now()
+			owner, name := splitFullName(t.FullName)
+			cacheMu.Lock()
+			prev, hit := cache.Repos[t.FullName]
+			cacheMu.Unlock()
+
 			if env.Log != nil && !quiet {
 				env.Log.Info("languages: walking",
 					"repo", t.FullName, "source", t.Source, "size_kb", t.SizeKB)
 			}
-			res, path, err := walkTask(gctx, env, t, preds, login)
+
+			entry, source, err := resolveRepo(t, prev, hit,
+				func() (walkResult, string, error) { return walkTask(gctx, env, t, preds, login) },
+				func(base repoEntry) (repoEntry, foldOutcome, error) {
+					return walkRepoViaCompare(gctx, env, owner, name, base.HeadSHA, t.DefaultBranch, preds, base)
+				},
+			)
 			n := atomic.AddInt32(&done, 1)
 			if err != nil {
 				kind, reason := classifyWalkErr(err)
@@ -248,24 +266,34 @@ func fetchIndepth(ctx context.Context, env *plugin.Env, cfg Config) (Data, error
 					}
 					env.Log.Warn("languages: walk failed",
 						"repo", repo, "i", n, "total", total,
-						"path", path, "dur_ms", time.Since(t0).Milliseconds(),
-						"reason", reason)
+						"dur_ms", time.Since(t0).Milliseconds(), "reason", reason)
 				}
 				return nil
 			}
-			atomic.AddInt64(&totalAuthored, int64(res.Commits))
-			atomic.AddInt64(&totalFiles, int64(res.Files))
-			atomic.AddInt64(&totalLines, int64(res.Lines))
+
+			if source != "cache" && source != "fold" {
+				if h := resolveHeadSHA(gctx, env, owner, name, t.DefaultBranch); h != "" {
+					entry.HeadSHA = h
+				}
+			}
+
+			atomic.AddInt64(&totalAuthored, int64(entry.Commits))
+			atomic.AddInt64(&totalFiles, int64(entry.Files))
+			atomic.AddInt64(&totalLines, int64(entry.Lines))
 			mu.Lock()
-			for name, n := range res.Bytes {
-				bytes[name] += n
+			for lang, b := range entry.Bytes {
+				bytes[lang] += b
 			}
 			mu.Unlock()
+			cacheMu.Lock()
+			cache.Repos[t.FullName] = entry
+			cacheMu.Unlock()
+
 			if env.Log != nil && !quiet {
 				env.Log.Info("languages: walked",
 					"repo", t.FullName, "i", n, "total", total,
-					"path", path, "dur_ms", time.Since(t0).Milliseconds(),
-					"authored", res.Commits, "langs", len(res.Bytes))
+					"source", source, "dur_ms", time.Since(t0).Milliseconds(),
+					"authored", entry.Commits, "langs", len(entry.Bytes))
 			}
 			return nil
 		})
@@ -279,6 +307,15 @@ func fetchIndepth(ctx context.Context, env *plugin.Env, cfg Config) (Data, error
 	}
 	if stopHeartbeat != nil {
 		close(stopHeartbeat)
+	}
+
+	seen := make(map[string]struct{}, len(tasks))
+	for _, t := range tasks {
+		seen[t.FullName] = struct{}{}
+	}
+	cache.prune(seen)
+	if err := saveCache(cfg.IndepthCachePath, cache); err != nil && env.Log != nil {
+		env.Log.Warn("languages: cache save failed", "err", err)
 	}
 
 	if env.Log != nil {
@@ -787,4 +824,50 @@ func splitFullName(s string) (owner, name string) {
 		return "", s
 	}
 	return s[:i], s[i+1:]
+}
+
+func resolveRepo(
+	t repoTask,
+	prev repoEntry,
+	hit bool,
+	compute func() (walkResult, string, error),
+	fold func(repoEntry) (repoEntry, foldOutcome, error),
+) (repoEntry, string, error) {
+	recompute := func() (repoEntry, string, error) {
+		res, source, err := compute()
+		if err != nil {
+			return repoEntry{}, source, err
+		}
+		return repoEntry{
+			HeadSHA:  prev.HeadSHA,
+			PushedAt: t.PushedAt,
+			Bytes:    res.Bytes,
+			Commits:  res.Commits,
+			Files:    res.Files,
+			Lines:    res.Lines,
+		}, source, nil
+	}
+	if !hit {
+		return recompute()
+	}
+	if t.PushedAt != "" && t.PushedAt == prev.PushedAt {
+		return prev, "cache", nil
+	}
+	folded, outcome, err := fold(prev)
+	if err != nil || outcome == foldRecompute {
+		return recompute()
+	}
+	folded.PushedAt = t.PushedAt
+	return folded, "fold", nil
+}
+
+func resolveHeadSHA(ctx context.Context, env *plugin.Env, owner, name, branch string) string {
+	if env.REST == nil || branch == "" {
+		return ""
+	}
+	b, _, err := env.REST.Repositories.GetBranch(ctx, owner, name, branch, 1)
+	if err != nil {
+		return ""
+	}
+	return b.GetCommit().GetSHA()
 }
