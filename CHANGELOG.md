@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/twangodev/gmetrics/compare/v1.0.1...v1.1.0) (2026-05-26)
+
+
+### Features
+
+* **languages:** include contributed-to repos via hybrid clone/API path ([dcecf08](https://github.com/twangodev/gmetrics/commit/dcecf08bbe4302bf5ca9a290d643b11136d8fb09))
+
 ## [1.0.1](https://github.com/twangodev/gmetrics/compare/v1.0.0...v1.0.1) (2026-05-24)
 
 
