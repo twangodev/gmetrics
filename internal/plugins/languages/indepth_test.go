@@ -183,3 +183,83 @@ func TestBuildAuthorPredicates_NoDatabaseID(t *testing.T) {
 	// so it'd match the bare login predicate — that's the upstream
 	// substring behaviour and not something we try to defend against.
 }
+
+func TestResolveRepoReusesWhenPushedAtUnchanged(t *testing.T) {
+	prev := repoEntry{HeadSHA: "h1", PushedAt: "t1", Bytes: map[string]int{"Go": 7}, Commits: 1, Files: 1, Lines: 7}
+	called := false
+	compute := func() (walkResult, string, error) {
+		called = true
+		return walkResult{}, "clone", nil
+	}
+	fold := func(base repoEntry) (repoEntry, foldOutcome, error) {
+		t.Fatal("fold must not run when pushed_at is unchanged")
+		return base, foldApplied, nil
+	}
+	got, _, err := resolveRepo(repoTask{FullName: "o/r", PushedAt: "t1"}, prev, true, compute, fold)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if called {
+		t.Fatal("compute must not run on cache hit")
+	}
+	if got.Bytes["Go"] != 7 {
+		t.Fatalf("want reused entry, got %+v", got)
+	}
+}
+
+func TestResolveRepoFoldsWhenChanged(t *testing.T) {
+	prev := repoEntry{HeadSHA: "h1", PushedAt: "t1", Bytes: map[string]int{"Go": 7}, Commits: 1}
+	fold := func(base repoEntry) (repoEntry, foldOutcome, error) {
+		base.Bytes = map[string]int{"Go": 10}
+		base.PushedAt = "t2"
+		return base, foldApplied, nil
+	}
+	got, _, err := resolveRepo(repoTask{FullName: "o/r", PushedAt: "t2"}, prev, true,
+		func() (walkResult, string, error) { t.Fatal("should fold, not recompute"); return walkResult{}, "", nil },
+		fold)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Bytes["Go"] != 10 || got.PushedAt != "t2" {
+		t.Fatalf("want folded entry, got %+v", got)
+	}
+}
+
+func TestResolveRepoRecomputesOnFoldRecompute(t *testing.T) {
+	prev := repoEntry{HeadSHA: "h1", PushedAt: "t1"}
+	computed := false
+	compute := func() (walkResult, string, error) {
+		computed = true
+		return walkResult{Bytes: map[string]int{"Rust": 4}, Commits: 1, Files: 1, Lines: 4}, "clone", nil
+	}
+	fold := func(base repoEntry) (repoEntry, foldOutcome, error) {
+		return base, foldRecompute, nil
+	}
+	got, _, err := resolveRepo(repoTask{FullName: "o/r", PushedAt: "t2", DefaultBranch: "main"}, prev, true, compute, fold)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !computed {
+		t.Fatal("recompute must run when fold returns foldRecompute")
+	}
+	if got.Bytes["Rust"] != 4 {
+		t.Fatalf("want recomputed entry, got %+v", got)
+	}
+}
+
+func TestResolveRepoComputesOnCacheMiss(t *testing.T) {
+	compute := func() (walkResult, string, error) {
+		return walkResult{Bytes: map[string]int{"Go": 2}, Commits: 1, Files: 1, Lines: 2}, "clone", nil
+	}
+	fold := func(base repoEntry) (repoEntry, foldOutcome, error) {
+		t.Fatal("no fold on cache miss")
+		return base, foldApplied, nil
+	}
+	got, _, err := resolveRepo(repoTask{FullName: "o/r", PushedAt: "t1"}, repoEntry{}, false, compute, fold)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Bytes["Go"] != 2 || got.PushedAt != "t1" {
+		t.Fatalf("want computed entry, got %+v", got)
+	}
+}

@@ -47,6 +47,7 @@ type Config struct {
 	// Only consulted by the indepth path; the GraphQL path uses GitHub's
 	// pre-computed per-repo aggregates which already reflect ownership.
 	CommitsAuthoring []string `koanf:"commits_authoring"`
+	IndepthCachePath string   `koanf:"indepth_cache"`
 }
 
 // defaultConfig returns the documented defaults for the languages plugin so
