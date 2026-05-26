@@ -25,10 +25,11 @@ import (
 
 const (
 	indepthConcurrency = 8
-	perRepoBudget      = 3 * time.Minute
 	noTimeout          = time.Duration(-1)
 	apiThreshold       = 50
 )
+
+var perRepoBudget = 3 * time.Minute
 
 var gitEnv = []string{"GIT_TERMINAL_PROMPT=0"}
 
@@ -344,9 +345,6 @@ type walkResult struct {
 const commitMarker = "__GMETRICS_COMMIT__"
 
 func walkRepo(ctx context.Context, cloneURL string, preds []string) (walkResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, perRepoBudget)
-	defer cancel()
-
 	dir, err := os.MkdirTemp("", "gmetrics-clone-*")
 	if err != nil {
 		return walkResult{}, fmt.Errorf("mktemp: %w", err)
@@ -530,28 +528,36 @@ func buildRepoTasks(ctx context.Context, env *plugin.Env, login string, cfg Conf
 	return tasks, nil
 }
 
+func withRepoBudget(ctx context.Context, fn func(context.Context) (walkResult, string, error)) (walkResult, string, error) {
+	ctx, cancel := context.WithTimeout(ctx, perRepoBudget)
+	defer cancel()
+	return fn(ctx)
+}
+
 func walkTask(ctx context.Context, env *plugin.Env, t repoTask, preds []string, login string) (walkResult, string, error) {
-	owner, name := splitFullName(t.FullName)
+	return withRepoBudget(ctx, func(ctx context.Context) (walkResult, string, error) {
+		owner, name := splitFullName(t.FullName)
 
-	if t.Source == "contributed" && env.REST != nil {
-		if count, err := probeAuthorCommitCount(ctx, env, owner, name, login); err == nil && count < apiThreshold {
-			res, err := walkRepoViaAPI(ctx, env, owner, name, preds)
-			return res, "api", err
+		if t.Source == "contributed" && env.REST != nil {
+			if count, err := probeAuthorCommitCount(ctx, env, owner, name, login); err == nil && count < apiThreshold {
+				res, err := walkRepoViaAPI(ctx, env, owner, name, preds)
+				return res, "api", err
+			}
 		}
-	}
 
-	res, err := walkRepo(ctx, authCloneURL(t.CloneURL, env.Token), preds)
-	if err == nil {
-		return res, "clone", nil
-	}
-
-	if env.REST != nil && owner != "" && name != "" {
-		fbRes, fbErr := walkRepoViaAPI(ctx, env, owner, name, preds)
-		if fbErr == nil {
-			return fbRes, "api-fallback", nil
+		res, err := walkRepo(ctx, authCloneURL(t.CloneURL, env.Token), preds)
+		if err == nil {
+			return res, "clone", nil
 		}
-	}
-	return res, "clone", err
+
+		if env.REST != nil && owner != "" && name != "" {
+			fbRes, fbErr := walkRepoViaAPI(ctx, env, owner, name, preds)
+			if fbErr == nil {
+				return fbRes, "api-fallback", nil
+			}
+		}
+		return res, "clone", err
+	})
 }
 
 type contribRepo struct {
