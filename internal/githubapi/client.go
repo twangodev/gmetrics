@@ -30,22 +30,21 @@ func New(ctx context.Context, cfg Config) (*Clients, error) {
 	}
 	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: cfg.Token})
 
-	// oauth2.NewClient layers an authedTransport over its inner client.
-	// If the caller supplied an HTTPClient (e.g. our retry-equipped one), we
-	// want OAuth tokens to flow through it: wrap the OAuth source as a
-	// RoundTripper over the supplied transport.
 	var httpClient *http.Client
 	if cfg.HTTPClient != nil {
-		base := cfg.HTTPClient
-		// Compose: base.Transport -> oauth2.Transport(Source=ts).
 		httpClient = &http.Client{
 			Transport: &oauth2.Transport{
 				Source: ts,
-				Base:   base.Transport,
+				Base:   rateLimitedTransport(cfg.HTTPClient.Transport),
 			},
 		}
 	} else {
-		httpClient = oauth2.NewClient(ctx, ts)
+		httpClient = &http.Client{
+			Transport: &oauth2.Transport{
+				Source: ts,
+				Base:   rateLimitedTransport(nil),
+			},
+		}
 	}
 
 	rest := github.NewClient(httpClient)
