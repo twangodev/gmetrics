@@ -95,6 +95,7 @@ func runRender(cmd *cobra.Command, args []string) error {
 	// 5. Plugin env.
 	env := &plugin.Env{
 		Login:   cfg.User,
+		Token:   cfg.GitHub.Token,
 		REST:    clients.REST,
 		GraphQL: clients.GraphQL,
 		HTTP:    hc.HTTPClient(),

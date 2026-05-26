@@ -15,6 +15,7 @@ import (
 type Env struct {
 	Login   string
 	User    UserContext
+	Token   string
 	REST    *github.Client
 	GraphQL *githubv4.Client
 	HTTP    *http.Client

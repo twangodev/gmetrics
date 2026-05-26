@@ -32,34 +32,43 @@ const (
 
 var gitEnv = []string{"GIT_TERMINAL_PROMPT=0"}
 
-var sensitivePattern = regexp.MustCompile(`(?:https?://\S+)|(?:[\w.+-]+@[\w-]+(?:\.[\w-]+)+)`)
-
-func sanitizeErr(err error) string {
-	return sensitivePattern.ReplaceAllString(err.Error(), "<redacted>")
-}
-
 type walkErrKind int
 
 const (
 	walkErrOther walkErrKind = iota
 	walkErrNoAccess
 	walkErrRateLimit
+	walkErrTimeout
 )
 
-func classifyWalkErr(err error) walkErrKind {
+func authCloneURL(rawURL, token string) string {
+	if token == "" {
+		return rawURL
+	}
+	const prefix = "https://"
+	if !strings.HasPrefix(rawURL, prefix) || strings.Contains(rawURL[len(prefix):], "@") {
+		return rawURL
+	}
+	return prefix + "oauth2:" + token + "@" + rawURL[len(prefix):]
+}
+
+func classifyWalkErr(err error) (walkErrKind, string) {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return walkErrTimeout, "timed out"
+	}
 	s := err.Error()
 	switch {
 	case strings.Contains(s, "terminal prompts disabled"),
 		strings.Contains(s, "Repository not found"),
 		strings.Contains(s, "Authentication failed"),
 		strings.Contains(s, "could not read Username"):
-		return walkErrNoAccess
+		return walkErrNoAccess, "no access"
 	case strings.Contains(s, "rate limit exceeded"),
 		strings.Contains(s, "API rate limit"),
 		strings.Contains(s, "secondary rate limit"):
-		return walkErrRateLimit
+		return walkErrRateLimit, "rate limited"
 	default:
-		return walkErrOther
+		return walkErrOther, "clone or walk failed"
 	}
 }
 
@@ -223,7 +232,7 @@ func fetchIndepth(ctx context.Context, env *plugin.Env, cfg Config) (Data, error
 			res, path, err := walkTask(gctx, env, t, preds, login)
 			n := atomic.AddInt32(&done, 1)
 			if err != nil {
-				kind := classifyWalkErr(err)
+				kind, reason := classifyWalkErr(err)
 				if kind == walkErrNoAccess {
 					atomic.AddInt32(&skippedNoAccess, 1)
 					return nil
@@ -233,14 +242,13 @@ func fetchIndepth(ctx context.Context, env *plugin.Env, cfg Config) (Data, error
 				}
 				if env.Log != nil {
 					repo := t.FullName
-					msg := err.Error()
 					if quiet {
 						repo = "***"
-						msg = sanitizeErr(err)
 					}
 					env.Log.Warn("languages: walk failed",
 						"repo", repo, "i", n, "total", total,
-						"path", path, "dur_ms", time.Since(t0).Milliseconds(), "err", msg)
+						"path", path, "dur_ms", time.Since(t0).Milliseconds(),
+						"reason", reason)
 				}
 				return nil
 			}
@@ -532,7 +540,7 @@ func walkTask(ctx context.Context, env *plugin.Env, t repoTask, preds []string, 
 		}
 	}
 
-	res, err := walkRepo(ctx, t.CloneURL, preds)
+	res, err := walkRepo(ctx, authCloneURL(t.CloneURL, env.Token), preds)
 	if err == nil {
 		return res, "clone", nil
 	}
