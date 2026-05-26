@@ -153,6 +153,27 @@ func fetchIndepth(ctx context.Context, env *plugin.Env, cfg Config) (Data, error
 		totalLines    int64
 	)
 	startedAt := time.Now()
+	quiet := os.Getenv("CI") == "true"
+
+	var stopHeartbeat chan struct{}
+	if quiet && env.Log != nil {
+		stopHeartbeat = make(chan struct{})
+		go func() {
+			t := time.NewTicker(30 * time.Second)
+			defer t.Stop()
+			for {
+				select {
+				case <-stopHeartbeat:
+					return
+				case <-t.C:
+					n := atomic.LoadInt32(&done)
+					env.Log.Info("languages: indepth progress",
+						"completed", n, "total", len(tasks),
+						"elapsed_s", int(time.Since(startedAt).Seconds()))
+				}
+			}
+		}()
+	}
 
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(indepthConcurrency)
@@ -162,7 +183,7 @@ func fetchIndepth(ctx context.Context, env *plugin.Env, cfg Config) (Data, error
 		t := t
 		g.Go(func() error {
 			t0 := time.Now()
-			if env.Log != nil {
+			if env.Log != nil && !quiet {
 				env.Log.Info("languages: walking",
 					"repo", t.FullName, "source", t.Source, "size_kb", t.SizeKB)
 			}
@@ -170,8 +191,12 @@ func fetchIndepth(ctx context.Context, env *plugin.Env, cfg Config) (Data, error
 			n := atomic.AddInt32(&done, 1)
 			if err != nil {
 				if env.Log != nil {
+					repo := t.FullName
+					if quiet {
+						repo = "***"
+					}
 					env.Log.Warn("languages: walk failed",
-						"repo", t.FullName, "i", n, "total", total,
+						"repo", repo, "i", n, "total", total,
 						"path", path, "dur_ms", time.Since(t0).Milliseconds(), "err", err)
 				}
 				return nil
@@ -184,7 +209,7 @@ func fetchIndepth(ctx context.Context, env *plugin.Env, cfg Config) (Data, error
 				bytes[name] += n
 			}
 			mu.Unlock()
-			if env.Log != nil {
+			if env.Log != nil && !quiet {
 				env.Log.Info("languages: walked",
 					"repo", t.FullName, "i", n, "total", total,
 					"path", path, "dur_ms", time.Since(t0).Milliseconds(),
@@ -195,7 +220,13 @@ func fetchIndepth(ctx context.Context, env *plugin.Env, cfg Config) (Data, error
 	}
 
 	if err := g.Wait(); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		if stopHeartbeat != nil {
+			close(stopHeartbeat)
+		}
 		return Data{}, err
+	}
+	if stopHeartbeat != nil {
+		close(stopHeartbeat)
 	}
 
 	if env.Log != nil {
