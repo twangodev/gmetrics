@@ -650,30 +650,34 @@ func walkRepoViaAPI(ctx context.Context, env *plugin.Env, owner, name string, pr
 		if err != nil {
 			continue
 		}
-		for _, f := range commit.Files {
-			added := f.GetAdditions()
-			path := f.GetFilename()
-			if added <= 0 || path == "" {
-				continue
-			}
-			if enry.IsVendor(path) || enry.IsDocumentation(path) || enry.IsGenerated(path, nil) {
-				continue
-			}
-			lang := classifyPath(path)
-			if lang == "" {
-				continue
-			}
-			switch enry.GetLanguageType(lang) {
-			case enry.Programming, enry.Markup:
-			default:
-				continue
-			}
-			res.Bytes[lang] += added
-			res.Files++
-			res.Lines += added
-		}
+		accumulateCommit(&res, commit.Files)
 	}
 	return res, nil
+}
+
+func accumulateCommit(res *walkResult, files []*github.CommitFile) {
+	for _, f := range files {
+		added := f.GetAdditions()
+		path := f.GetFilename()
+		if added <= 0 || path == "" {
+			continue
+		}
+		if enry.IsVendor(path) || enry.IsDocumentation(path) || enry.IsGenerated(path, nil) {
+			continue
+		}
+		lang := classifyPath(path)
+		if lang == "" {
+			continue
+		}
+		switch enry.GetLanguageType(lang) {
+		case enry.Programming, enry.Markup:
+		default:
+			continue
+		}
+		res.Bytes[lang] += added
+		res.Files++
+		res.Lines += added
+	}
 }
 
 func buildCombinedSearchQuery(preds []string, owner, name string) string {

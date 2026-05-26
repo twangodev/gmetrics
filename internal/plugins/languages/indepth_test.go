@@ -5,9 +5,30 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-github/v66/github"
 	"github.com/stretchr/testify/require"
 	"github.com/twangodev/gmetrics/internal/plugin"
 )
+
+func TestAccumulateCommitFiltersAndSums(t *testing.T) {
+	res := walkResult{Bytes: map[string]int{}}
+	files := []*github.CommitFile{
+		{Filename: github.String("main.go"), Additions: github.Int(5)},
+		{Filename: github.String("vendor/x/y.go"), Additions: github.Int(99)},
+		{Filename: github.String("README.md"), Additions: github.Int(3)},
+		{Filename: github.String("bin.png"), Additions: github.Int(0)},
+	}
+	accumulateCommit(&res, files)
+	if res.Bytes["Go"] != 5 {
+		t.Fatalf("want Go=5, got %d", res.Bytes["Go"])
+	}
+	if _, ok := res.Bytes["Markdown"]; ok {
+		t.Fatal("documentation file should be excluded")
+	}
+	if res.Files != 1 || res.Lines != 5 {
+		t.Fatalf("want files=1 lines=5, got files=%d lines=%d", res.Files, res.Lines)
+	}
+}
 
 func TestBuildCombinedSearchQuery(t *testing.T) {
 	preds := []string{"octocat", "octo@users.noreply.github.com"}
