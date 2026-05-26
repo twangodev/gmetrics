@@ -10,6 +10,15 @@ import (
 	"github.com/twangodev/gmetrics/internal/plugin"
 )
 
+func TestRepoTaskCarriesWatermarkFields(t *testing.T) {
+	var rt repoTask
+	rt.PushedAt = "2026-05-26T00:00:00Z"
+	rt.DefaultBranch = "main"
+	if rt.PushedAt == "" || rt.DefaultBranch == "" {
+		t.Fatal("repoTask must carry PushedAt and DefaultBranch")
+	}
+}
+
 func TestAccumulateCommitFiltersAndSums(t *testing.T) {
 	res := walkResult{Bytes: map[string]int{}}
 	files := []*github.CommitFile{
