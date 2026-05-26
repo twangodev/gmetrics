@@ -480,10 +480,12 @@ func classifyPath(path string) string {
 }
 
 type repoTask struct {
-	FullName string
-	CloneURL string
-	SizeKB   int
-	Source   string // "owned" or "contributed"
+	FullName      string
+	CloneURL      string
+	SizeKB        int
+	Source        string // "owned" or "contributed"
+	PushedAt      string
+	DefaultBranch string
 }
 
 func buildRepoTasks(ctx context.Context, env *plugin.Env, login string, cfg Config) ([]repoTask, error) {
@@ -500,10 +502,12 @@ func buildRepoTasks(ctx context.Context, env *plugin.Env, login string, cfg Conf
 		}
 		seen[fn] = struct{}{}
 		tasks = append(tasks, repoTask{
-			FullName: fn,
-			CloneURL: r.GetCloneURL(),
-			SizeKB:   r.GetSize(),
-			Source:   "owned",
+			FullName:      fn,
+			CloneURL:      r.GetCloneURL(),
+			SizeKB:        r.GetSize(),
+			Source:        "owned",
+			PushedAt:      r.GetPushedAt().UTC().Format(time.RFC3339),
+			DefaultBranch: r.GetDefaultBranch(),
 		})
 	}
 
@@ -520,9 +524,11 @@ func buildRepoTasks(ctx context.Context, env *plugin.Env, login string, cfg Conf
 		}
 		seen[c.NameWithOwner] = struct{}{}
 		tasks = append(tasks, repoTask{
-			FullName: c.NameWithOwner,
-			CloneURL: c.CloneURL,
-			Source:   "contributed",
+			FullName:      c.NameWithOwner,
+			CloneURL:      c.CloneURL,
+			Source:        "contributed",
+			PushedAt:      c.PushedAt,
+			DefaultBranch: c.DefaultBranch,
 		})
 	}
 	return tasks, nil
@@ -563,6 +569,8 @@ func walkTask(ctx context.Context, env *plugin.Env, t repoTask, preds []string, 
 type contribRepo struct {
 	NameWithOwner string
 	CloneURL      string
+	PushedAt      string
+	DefaultBranch string
 }
 
 func listContributedRepos(ctx context.Context, env *plugin.Env, login string) ([]contribRepo, error) {
@@ -573,8 +581,12 @@ func listContributedRepos(ctx context.Context, env *plugin.Env, login string) ([
 		User struct {
 			RepositoriesContributedTo struct {
 				Nodes []struct {
-					NameWithOwner githubv4.String
-					URL           githubv4.String
+					NameWithOwner    githubv4.String
+					URL              githubv4.String
+					PushedAt         githubv4.DateTime
+					DefaultBranchRef struct {
+						Name githubv4.String
+					}
 				}
 				PageInfo struct {
 					EndCursor   githubv4.String
@@ -596,6 +608,8 @@ func listContributedRepos(ctx context.Context, env *plugin.Env, login string) ([
 			out = append(out, contribRepo{
 				NameWithOwner: string(n.NameWithOwner),
 				CloneURL:      string(n.URL) + ".git",
+				PushedAt:      n.PushedAt.UTC().Format(time.RFC3339),
+				DefaultBranch: string(n.DefaultBranchRef.Name),
 			})
 		}
 		if !q.User.RepositoriesContributedTo.PageInfo.HasNextPage {
