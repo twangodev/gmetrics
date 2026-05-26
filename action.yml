@@ -71,6 +71,10 @@ inputs:
     description: Enable indepth mode (clones repos + linguist analysis; slow)
     required: false
     default: 'no'
+  plugin_languages_indepth_cache:
+    description: Path to the indepth incremental cache file (persist across runs with actions/cache)
+    required: false
+    default: '.gmetrics-cache/languages-indepth.json'
 
   plugin_people:
     description: Enable the people plugin
