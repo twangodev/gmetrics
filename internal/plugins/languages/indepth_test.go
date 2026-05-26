@@ -2,9 +2,12 @@ package languages
 
 import (
 	"context"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
+	gitcmd "github.com/gogs/git-module"
 	"github.com/google/go-github/v66/github"
 	"github.com/stretchr/testify/require"
 	"github.com/twangodev/gmetrics/internal/plugin"
@@ -261,5 +264,53 @@ func TestResolveRepoComputesOnCacheMiss(t *testing.T) {
 	}
 	if got.Bytes["Go"] != 2 || got.PushedAt != "t1" {
 		t.Fatalf("want computed entry, got %+v", got)
+	}
+}
+
+func TestResolveRepoUsesComputedHeadSHA(t *testing.T) {
+	compute := func() (walkResult, string, error) {
+		return walkResult{Bytes: map[string]int{"Go": 1}, HeadSHA: "tip123"}, "clone", nil
+	}
+	fold := func(base repoEntry) (repoEntry, foldOutcome, error) {
+		t.Fatal("no fold")
+		return base, foldApplied, nil
+	}
+	got, _, err := resolveRepo(repoTask{FullName: "o/r", PushedAt: "t1"}, repoEntry{}, false, compute, fold)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.HeadSHA != "tip123" {
+		t.Fatalf("want HeadSHA tip123, got %q", got.HeadSHA)
+	}
+}
+
+func TestWalkRepoCapturesHeadSHA(t *testing.T) {
+	if _, err := gitcmd.BinVersion(); err != nil {
+		t.Skip("git binary not available")
+	}
+	dir := t.TempDir()
+	run := func(args ...string) string {
+		out, err := gitcmd.NewCommand(args...).RunInDir(dir)
+		if err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	run("init", "-q")
+	run("config", "user.email", "dev@example.com")
+	run("config", "user.name", "Dev")
+	if err := os.WriteFile(dir+"/main.go", []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "main.go")
+	run("commit", "-q", "-m", "init")
+	want := run("rev-parse", "HEAD")
+
+	res, err := walkRepo(context.Background(), dir, []string{"dev@example.com"})
+	if err != nil {
+		t.Fatalf("walkRepo: %v", err)
+	}
+	if res.HeadSHA != want {
+		t.Fatalf("want HeadSHA %q, got %q", want, res.HeadSHA)
 	}
 }

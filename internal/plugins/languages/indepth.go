@@ -271,7 +271,7 @@ func fetchIndepth(ctx context.Context, env *plugin.Env, cfg Config) (Data, error
 				return nil
 			}
 
-			if source != "cache" && source != "fold" {
+			if source != "cache" && source != "fold" && entry.HeadSHA == "" {
 				if h := resolveHeadSHA(gctx, env, owner, name, t.DefaultBranch); h != "" {
 					entry.HeadSHA = h
 				}
@@ -375,6 +375,7 @@ type walkResult struct {
 	Commits  int
 	Files    int
 	Lines    int
+	HeadSHA  string
 	CloneDur time.Duration
 	LogDur   time.Duration
 }
@@ -401,6 +402,13 @@ func walkRepo(ctx context.Context, cloneURL string, preds []string) (walkResult,
 		return walkResult{}, fmt.Errorf("clone: %w", err)
 	}
 	cloneDur := time.Since(tClone)
+
+	var headSHA string
+	if out, rpErr := gitcmd.NewCommand("rev-parse", "HEAD").
+		AddOptions(gitcmd.CommandOptions{Context: ctx, Envs: gitEnv, Timeout: noTimeout}).
+		RunInDir(dir); rpErr == nil {
+		headSHA = strings.TrimSpace(string(out))
+	}
 
 	args := []string{
 		"log",
@@ -432,7 +440,7 @@ func walkRepo(ctx context.Context, cloneURL string, preds []string) (walkResult,
 		_ = pw.Close()
 	}()
 
-	res := walkResult{Bytes: map[string]int{}, CloneDur: cloneDur}
+	res := walkResult{Bytes: map[string]int{}, CloneDur: cloneDur, HeadSHA: headSHA}
 	scanner := bufio.NewScanner(pr)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	for scanner.Scan() {
@@ -839,7 +847,7 @@ func resolveRepo(
 			return repoEntry{}, source, err
 		}
 		return repoEntry{
-			HeadSHA:  prev.HeadSHA,
+			HeadSHA:  res.HeadSHA,
 			PushedAt: t.PushedAt,
 			Bytes:    res.Bytes,
 			Commits:  res.Commits,
