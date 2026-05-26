@@ -9,6 +9,15 @@ import (
 	"github.com/twangodev/gmetrics/internal/plugin"
 )
 
+func TestBuildCombinedSearchQuery(t *testing.T) {
+	preds := []string{"octocat", "octo@users.noreply.github.com"}
+	got := buildCombinedSearchQuery(preds, "octocat", "demo")
+	want := "author:octocat author-email:octo@users.noreply.github.com repo:octocat/demo"
+	if got != want {
+		t.Fatalf("want %q, got %q", want, got)
+	}
+}
+
 func TestWalkTaskHonorsPerRepoBudget(t *testing.T) {
 	old := perRepoBudget
 	perRepoBudget = 50 * time.Millisecond
