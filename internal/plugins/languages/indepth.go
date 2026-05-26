@@ -18,6 +18,7 @@ import (
 	enry "github.com/go-enry/go-enry/v2"
 	gitcmd "github.com/gogs/git-module"
 	"github.com/google/go-github/v66/github"
+	"github.com/shurcooL/githubv4"
 	"github.com/twangodev/gmetrics/internal/plugin"
 	"golang.org/x/sync/errgroup"
 )
@@ -26,6 +27,7 @@ const (
 	indepthConcurrency = 8
 	perRepoBudget      = 3 * time.Minute
 	noTimeout          = time.Duration(-1)
+	apiThreshold       = 50
 )
 
 var gitEnv = []string{"GIT_TERMINAL_PROMPT=0"}
@@ -133,16 +135,13 @@ func fetchIndepth(ctx context.Context, env *plugin.Env, cfg Config) (Data, error
 		return Data{}, fmt.Errorf("languages: fetch indepth: git binary not available: %w", err)
 	}
 
-	if env.Log != nil {
-		env.Log.Info("languages: indepth listing repos", "user", login)
-	}
-	repos, err := listUserRepos(ctx, env, login, cfg)
+	tasks, err := buildRepoTasks(ctx, env, login, cfg)
 	if err != nil {
 		return Data{}, fmt.Errorf("languages: fetch indepth: list repos: %w", err)
 	}
 	if env.Log != nil {
-		env.Log.Info("languages: indepth cloning repos",
-			"count", len(repos), "concurrency", indepthConcurrency)
+		env.Log.Info("languages: indepth walking repos",
+			"count", len(tasks), "concurrency", indepthConcurrency)
 	}
 
 	var mu sync.Mutex
@@ -158,27 +157,22 @@ func fetchIndepth(ctx context.Context, env *plugin.Env, cfg Config) (Data, error
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(indepthConcurrency)
 
-	total := len(repos)
-	for _, repo := range repos {
-		repo := repo
+	total := len(tasks)
+	for _, t := range tasks {
+		t := t
 		g.Go(func() error {
-			cloneURL := repo.GetCloneURL()
-			if cloneURL == "" {
-				return nil
-			}
 			t0 := time.Now()
 			if env.Log != nil {
-				env.Log.Info("languages: cloning",
-					"repo", repo.GetFullName(),
-					"size_kb", repo.GetSize())
+				env.Log.Info("languages: walking",
+					"repo", t.FullName, "source", t.Source, "size_kb", t.SizeKB)
 			}
-			res, err := walkRepo(gctx, cloneURL, preds)
+			res, path, err := walkTask(gctx, env, t, preds, login)
 			n := atomic.AddInt32(&done, 1)
 			if err != nil {
 				if env.Log != nil {
-					env.Log.Warn("languages: clone failed",
-						"repo", repo.GetFullName(), "i", n, "total", total,
-						"dur_ms", time.Since(t0).Milliseconds(), "err", err)
+					env.Log.Warn("languages: walk failed",
+						"repo", t.FullName, "i", n, "total", total,
+						"path", path, "dur_ms", time.Since(t0).Milliseconds(), "err", err)
 				}
 				return nil
 			}
@@ -192,9 +186,8 @@ func fetchIndepth(ctx context.Context, env *plugin.Env, cfg Config) (Data, error
 			mu.Unlock()
 			if env.Log != nil {
 				env.Log.Info("languages: walked",
-					"repo", repo.GetFullName(), "i", n, "total", total,
-					"clone_ms", res.CloneDur.Milliseconds(),
-					"log_ms", res.LogDur.Milliseconds(),
+					"repo", t.FullName, "i", n, "total", total,
+					"path", path, "dur_ms", time.Since(t0).Milliseconds(),
 					"authored", res.Commits, "langs", len(res.Bytes))
 			}
 			return nil
@@ -402,4 +395,210 @@ func classifyPath(path string) string {
 		}
 	}
 	return ""
+}
+
+type repoTask struct {
+	FullName string
+	CloneURL string
+	SizeKB   int
+	Source   string // "owned" or "contributed"
+}
+
+func buildRepoTasks(ctx context.Context, env *plugin.Env, login string, cfg Config) ([]repoTask, error) {
+	owned, err := listUserRepos(ctx, env, login, cfg)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]struct{}{}
+	tasks := make([]repoTask, 0, len(owned))
+	for _, r := range owned {
+		fn := r.GetFullName()
+		if fn == "" || r.GetCloneURL() == "" {
+			continue
+		}
+		seen[fn] = struct{}{}
+		tasks = append(tasks, repoTask{
+			FullName: fn,
+			CloneURL: r.GetCloneURL(),
+			SizeKB:   r.GetSize(),
+			Source:   "owned",
+		})
+	}
+
+	contributed, err := listContributedRepos(ctx, env, login)
+	if err != nil {
+		if env.Log != nil {
+			env.Log.Warn("languages: list contributed repos failed", "err", err)
+		}
+		return tasks, nil
+	}
+	for _, c := range contributed {
+		if _, dup := seen[c.NameWithOwner]; dup {
+			continue
+		}
+		seen[c.NameWithOwner] = struct{}{}
+		tasks = append(tasks, repoTask{
+			FullName: c.NameWithOwner,
+			CloneURL: c.CloneURL,
+			Source:   "contributed",
+		})
+	}
+	return tasks, nil
+}
+
+func walkTask(ctx context.Context, env *plugin.Env, t repoTask, preds []string, login string) (walkResult, string, error) {
+	owner, name := splitFullName(t.FullName)
+
+	if t.Source == "contributed" && env.REST != nil {
+		if count, err := probeAuthorCommitCount(ctx, env, owner, name, login); err == nil && count < apiThreshold {
+			res, err := walkRepoViaAPI(ctx, env, owner, name, preds)
+			return res, "api", err
+		}
+	}
+
+	res, err := walkRepo(ctx, t.CloneURL, preds)
+	if err == nil {
+		return res, "clone", nil
+	}
+
+	if env.REST != nil && owner != "" && name != "" {
+		fbRes, fbErr := walkRepoViaAPI(ctx, env, owner, name, preds)
+		if fbErr == nil {
+			return fbRes, "api-fallback", nil
+		}
+	}
+	return res, "clone", err
+}
+
+type contribRepo struct {
+	NameWithOwner string
+	CloneURL      string
+}
+
+func listContributedRepos(ctx context.Context, env *plugin.Env, login string) ([]contribRepo, error) {
+	if env.GraphQL == nil {
+		return nil, nil
+	}
+	var q struct {
+		User struct {
+			RepositoriesContributedTo struct {
+				Nodes []struct {
+					NameWithOwner githubv4.String
+					URL           githubv4.String
+				}
+				PageInfo struct {
+					EndCursor   githubv4.String
+					HasNextPage githubv4.Boolean
+				}
+			} `graphql:"repositoriesContributedTo(first: 100, after: $after, includeUserRepositories: false, contributionTypes: [COMMIT, PULL_REQUEST])"`
+		} `graphql:"user(login: $login)"`
+	}
+	vars := map[string]any{
+		"login": githubv4.String(login),
+		"after": (*githubv4.String)(nil),
+	}
+	out := []contribRepo{}
+	for {
+		if err := env.GraphQL.Query(ctx, &q, vars); err != nil {
+			return nil, err
+		}
+		for _, n := range q.User.RepositoriesContributedTo.Nodes {
+			out = append(out, contribRepo{
+				NameWithOwner: string(n.NameWithOwner),
+				CloneURL:      string(n.URL) + ".git",
+			})
+		}
+		if !q.User.RepositoriesContributedTo.PageInfo.HasNextPage {
+			break
+		}
+		cursor := q.User.RepositoriesContributedTo.PageInfo.EndCursor
+		vars["after"] = &cursor
+	}
+	return out, nil
+}
+
+func probeAuthorCommitCount(ctx context.Context, env *plugin.Env, owner, name, login string) (int, error) {
+	query := fmt.Sprintf("author:%s repo:%s/%s", login, owner, name)
+	res, _, err := env.REST.Search.Commits(ctx, query, &github.SearchOptions{
+		ListOptions: github.ListOptions{PerPage: 1},
+	})
+	if err != nil {
+		return 0, err
+	}
+	return res.GetTotal(), nil
+}
+
+func walkRepoViaAPI(ctx context.Context, env *plugin.Env, owner, name string, preds []string) (walkResult, error) {
+	res := walkResult{Bytes: map[string]int{}}
+	seen := map[string]struct{}{}
+
+	for _, p := range preds {
+		query := buildSearchQuery(p) + fmt.Sprintf(" repo:%s/%s", owner, name)
+		opts := &github.SearchOptions{ListOptions: github.ListOptions{PerPage: 100}}
+		for {
+			if err := ctx.Err(); err != nil {
+				return res, err
+			}
+			sr, resp, err := env.REST.Search.Commits(ctx, query, opts)
+			if err != nil {
+				return res, err
+			}
+			for _, cr := range sr.Commits {
+				seen[cr.GetSHA()] = struct{}{}
+			}
+			if resp == nil || resp.NextPage == 0 {
+				break
+			}
+			opts.Page = resp.NextPage
+		}
+	}
+
+	res.Commits = len(seen)
+	for sha := range seen {
+		if err := ctx.Err(); err != nil {
+			return res, err
+		}
+		commit, _, err := env.REST.Repositories.GetCommit(ctx, owner, name, sha, nil)
+		if err != nil {
+			continue
+		}
+		for _, f := range commit.Files {
+			added := f.GetAdditions()
+			path := f.GetFilename()
+			if added <= 0 || path == "" {
+				continue
+			}
+			if enry.IsVendor(path) || enry.IsDocumentation(path) || enry.IsGenerated(path, nil) {
+				continue
+			}
+			lang := classifyPath(path)
+			if lang == "" {
+				continue
+			}
+			switch enry.GetLanguageType(lang) {
+			case enry.Programming, enry.Markup:
+			default:
+				continue
+			}
+			res.Bytes[lang] += added
+			res.Files++
+			res.Lines += added
+		}
+	}
+	return res, nil
+}
+
+func buildSearchQuery(predicate string) string {
+	if strings.Contains(predicate, "@") {
+		return "author-email:" + predicate
+	}
+	return "author:" + predicate
+}
+
+func splitFullName(s string) (owner, name string) {
+	i := strings.IndexByte(s, '/')
+	if i < 0 {
+		return "", s
+	}
+	return s[:i], s[i+1:]
 }
