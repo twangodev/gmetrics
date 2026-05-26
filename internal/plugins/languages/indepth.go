@@ -32,6 +32,37 @@ const (
 
 var gitEnv = []string{"GIT_TERMINAL_PROMPT=0"}
 
+var sensitivePattern = regexp.MustCompile(`(?:https?://\S+)|(?:[\w.+-]+@[\w-]+(?:\.[\w-]+)+)`)
+
+func sanitizeErr(err error) string {
+	return sensitivePattern.ReplaceAllString(err.Error(), "<redacted>")
+}
+
+type walkErrKind int
+
+const (
+	walkErrOther walkErrKind = iota
+	walkErrNoAccess
+	walkErrRateLimit
+)
+
+func classifyWalkErr(err error) walkErrKind {
+	s := err.Error()
+	switch {
+	case strings.Contains(s, "terminal prompts disabled"),
+		strings.Contains(s, "Repository not found"),
+		strings.Contains(s, "Authentication failed"),
+		strings.Contains(s, "could not read Username"):
+		return walkErrNoAccess
+	case strings.Contains(s, "rate limit exceeded"),
+		strings.Contains(s, "API rate limit"),
+		strings.Contains(s, "secondary rate limit"):
+		return walkErrRateLimit
+	default:
+		return walkErrOther
+	}
+}
+
 // buildAuthorPredicates returns lower-cased substrings to pass as
 // `--author=` patterns. ".user.login" expands into the bare login plus
 // both GitHub noreply forms; emails bound to the user's public GPG keys
@@ -147,10 +178,12 @@ func fetchIndepth(ctx context.Context, env *plugin.Env, cfg Config) (Data, error
 	var mu sync.Mutex
 	bytes := map[string]int{}
 	var (
-		done          int32
-		totalAuthored int64
-		totalFiles    int64
-		totalLines    int64
+		done            int32
+		totalAuthored   int64
+		totalFiles      int64
+		totalLines      int64
+		skippedNoAccess int32
+		failedRateLimit int32
 	)
 	startedAt := time.Now()
 	quiet := os.Getenv("CI") == "true"
@@ -190,14 +223,24 @@ func fetchIndepth(ctx context.Context, env *plugin.Env, cfg Config) (Data, error
 			res, path, err := walkTask(gctx, env, t, preds, login)
 			n := atomic.AddInt32(&done, 1)
 			if err != nil {
+				kind := classifyWalkErr(err)
+				if kind == walkErrNoAccess {
+					atomic.AddInt32(&skippedNoAccess, 1)
+					return nil
+				}
+				if kind == walkErrRateLimit {
+					atomic.AddInt32(&failedRateLimit, 1)
+				}
 				if env.Log != nil {
 					repo := t.FullName
+					msg := err.Error()
 					if quiet {
 						repo = "***"
+						msg = sanitizeErr(err)
 					}
 					env.Log.Warn("languages: walk failed",
 						"repo", repo, "i", n, "total", total,
-						"path", path, "dur_ms", time.Since(t0).Milliseconds(), "err", err)
+						"path", path, "dur_ms", time.Since(t0).Milliseconds(), "err", msg)
 				}
 				return nil
 			}
@@ -236,7 +279,9 @@ func fetchIndepth(ctx context.Context, env *plugin.Env, cfg Config) (Data, error
 			"authored_commits", atomic.LoadInt64(&totalAuthored),
 			"files", atomic.LoadInt64(&totalFiles),
 			"lines", atomic.LoadInt64(&totalLines),
-			"langs", len(bytes))
+			"langs", len(bytes),
+			"skipped_no_access", atomic.LoadInt32(&skippedNoAccess),
+			"failed_rate_limit", atomic.LoadInt32(&failedRateLimit))
 	}
 
 	data := assemble(cfg, bytes, nil, true)
