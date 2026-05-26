@@ -3,6 +3,7 @@ module github.com/twangodev/gmetrics
 go 1.26
 
 require (
+	github.com/gofri/go-github-ratelimit/v2 v2.0.2
 	github.com/google/go-github/v66 v66.0.0
 	github.com/hashicorp/go-retryablehttp v0.7.8
 	github.com/knadh/koanf/parsers/yaml v1.1.0
@@ -43,7 +44,6 @@ require (
 	github.com/go-git/go-git/v5 v5.19.1 // indirect
 	github.com/go-text/typesetting v0.3.4 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
-	github.com/gofri/go-github-ratelimit/v2 v2.0.2 // indirect
 	github.com/gogs/git-module v1.8.7 // indirect
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect

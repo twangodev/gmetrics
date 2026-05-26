@@ -56,12 +56,12 @@ func TestAccumulateCommitFiltersAndSums(t *testing.T) {
 	}
 }
 
-func TestBuildCombinedSearchQuery(t *testing.T) {
-	preds := []string{"octocat", "octo@users.noreply.github.com"}
-	got := buildCombinedSearchQuery(preds, "octocat", "demo")
-	want := "author:octocat author-email:octo@users.noreply.github.com repo:octocat/demo"
-	if got != want {
-		t.Fatalf("want %q, got %q", want, got)
+func TestBuildSearchQuery(t *testing.T) {
+	if got := buildSearchQuery("octocat"); got != "author:octocat" {
+		t.Fatalf("want author:octocat, got %q", got)
+	}
+	if got := buildSearchQuery("octo@users.noreply.github.com"); got != "author-email:octo@users.noreply.github.com" {
+		t.Fatalf("want author-email:..., got %q", got)
 	}
 }
 
@@ -217,8 +217,11 @@ func TestResolveRepoFoldsWhenChanged(t *testing.T) {
 		base.PushedAt = "t2"
 		return base, foldApplied, nil
 	}
-	got, _, err := resolveRepo(repoTask{FullName: "o/r", PushedAt: "t2"}, prev, true,
-		func() (walkResult, string, error) { t.Fatal("should fold, not recompute"); return walkResult{}, "", nil },
+	got, _, err := resolveRepo(repoTask{FullName: "o/r", PushedAt: "t2", DefaultBranch: "main"}, prev, true,
+		func() (walkResult, string, error) {
+			t.Fatal("should fold, not recompute")
+			return walkResult{}, "", nil
+		},
 		fold)
 	if err != nil {
 		t.Fatal(err)
@@ -264,6 +267,24 @@ func TestResolveRepoComputesOnCacheMiss(t *testing.T) {
 	}
 	if got.Bytes["Go"] != 2 || got.PushedAt != "t1" {
 		t.Fatalf("want computed entry, got %+v", got)
+	}
+}
+
+func TestResolveRepoRecomputesWhenFoldInputsMissing(t *testing.T) {
+	compute := func() (walkResult, string, error) {
+		return walkResult{Bytes: map[string]int{"Go": 9}, Commits: 1}, "clone", nil
+	}
+	fold := func(base repoEntry) (repoEntry, foldOutcome, error) {
+		t.Fatal("fold must not run without a base HeadSHA or default branch")
+		return base, foldApplied, nil
+	}
+	prev := repoEntry{PushedAt: "t1", Bytes: map[string]int{"Go": 1}}
+	got, _, err := resolveRepo(repoTask{FullName: "o/r", PushedAt: "t2", DefaultBranch: "main"}, prev, true, compute, fold)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Bytes["Go"] != 9 {
+		t.Fatalf("want recomputed entry, got %+v", got)
 	}
 }
 

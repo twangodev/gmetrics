@@ -681,23 +681,25 @@ func walkRepoViaAPI(ctx context.Context, env *plugin.Env, owner, name string, pr
 	res := walkResult{Bytes: map[string]int{}}
 	seen := map[string]struct{}{}
 
-	query := buildCombinedSearchQuery(preds, owner, name)
-	opts := &github.SearchOptions{ListOptions: github.ListOptions{PerPage: 100}}
-	for {
-		if err := ctx.Err(); err != nil {
-			return res, err
+	for _, p := range preds {
+		query := buildSearchQuery(p) + fmt.Sprintf(" repo:%s/%s", owner, name)
+		opts := &github.SearchOptions{ListOptions: github.ListOptions{PerPage: 100}}
+		for {
+			if err := ctx.Err(); err != nil {
+				return res, err
+			}
+			sr, resp, err := env.REST.Search.Commits(ctx, query, opts)
+			if err != nil {
+				return res, err
+			}
+			for _, cr := range sr.Commits {
+				seen[cr.GetSHA()] = struct{}{}
+			}
+			if resp == nil || resp.NextPage == 0 {
+				break
+			}
+			opts.Page = resp.NextPage
 		}
-		sr, resp, err := env.REST.Search.Commits(ctx, query, opts)
-		if err != nil {
-			return res, err
-		}
-		for _, cr := range sr.Commits {
-			seen[cr.GetSHA()] = struct{}{}
-		}
-		if resp == nil || resp.NextPage == 0 {
-			break
-		}
-		opts.Page = resp.NextPage
 	}
 
 	res.Commits = len(seen)
@@ -810,15 +812,6 @@ func accumulateCommit(res *walkResult, files []*github.CommitFile) {
 	}
 }
 
-func buildCombinedSearchQuery(preds []string, owner, name string) string {
-	parts := make([]string, 0, len(preds)+1)
-	for _, p := range preds {
-		parts = append(parts, buildSearchQuery(p))
-	}
-	parts = append(parts, fmt.Sprintf("repo:%s/%s", owner, name))
-	return strings.Join(parts, " ")
-}
-
 func buildSearchQuery(predicate string) string {
 	if strings.Contains(predicate, "@") {
 		return "author-email:" + predicate
@@ -860,6 +853,9 @@ func resolveRepo(
 	}
 	if t.PushedAt != "" && t.PushedAt == prev.PushedAt {
 		return prev, "cache", nil
+	}
+	if prev.HeadSHA == "" || t.DefaultBranch == "" {
+		return recompute()
 	}
 	folded, outcome, err := fold(prev)
 	if err != nil || outcome == foldRecompute {
