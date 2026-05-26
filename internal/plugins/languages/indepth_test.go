@@ -3,10 +3,32 @@ package languages
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/twangodev/gmetrics/internal/plugin"
 )
+
+func TestWalkTaskHonorsPerRepoBudget(t *testing.T) {
+	old := perRepoBudget
+	perRepoBudget = 50 * time.Millisecond
+	defer func() { perRepoBudget = old }()
+
+	done := make(chan struct{})
+	go func() {
+		_, _, _ = withRepoBudget(context.Background(), func(ctx context.Context) (walkResult, string, error) {
+			<-ctx.Done()
+			return walkResult{}, "", ctx.Err()
+		})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("withRepoBudget did not cancel at perRepoBudget")
+	}
+}
 
 // TestBuildAuthorPredicates_AndMatch is a table-driven smoke test for the
 // commits_authoring → predicate translation plus the per-commit matcher.
