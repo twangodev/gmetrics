@@ -669,6 +669,77 @@ func walkRepoViaAPI(ctx context.Context, env *plugin.Env, owner, name string, pr
 	return res, nil
 }
 
+func selectAuthoredSHAs(commits []*github.RepositoryCommit, preds []string) []string {
+	var out []string
+	for _, c := range commits {
+		a := c.GetCommit().GetAuthor()
+		if authorMatches(preds, a.GetName(), a.GetEmail()) {
+			out = append(out, c.GetSHA())
+		}
+	}
+	return out
+}
+
+type foldOutcome int
+
+const (
+	foldApplied foldOutcome = iota
+	foldRecompute
+)
+
+func walkRepoViaCompare(ctx context.Context, env *plugin.Env, owner, name, base, head string, preds []string, prev repoEntry) (repoEntry, foldOutcome, error) {
+	opts := &github.ListOptions{PerPage: 100}
+	cmp, _, err := env.REST.Repositories.CompareCommits(ctx, owner, name, base, head, opts)
+	if err != nil {
+		return prev, foldRecompute, err
+	}
+	switch cmp.GetStatus() {
+	case "identical":
+		return prev, foldApplied, nil
+	case "behind", "diverged":
+		return prev, foldRecompute, nil
+	}
+	if cmp.GetAheadBy() > apiThreshold {
+		return prev, foldRecompute, nil
+	}
+
+	res := walkResult{Bytes: map[string]int{}}
+	for _, sha := range selectAuthoredSHAs(cmp.Commits, preds) {
+		if err := ctx.Err(); err != nil {
+			return prev, foldRecompute, err
+		}
+		commit, _, err := env.REST.Repositories.GetCommit(ctx, owner, name, sha, nil)
+		if err != nil {
+			continue
+		}
+		accumulateCommit(&res, commit.Files)
+		res.Commits++
+	}
+
+	merged := prev
+	merged.Bytes = make(map[string]int, len(prev.Bytes)+len(res.Bytes))
+	for k, v := range prev.Bytes {
+		merged.Bytes[k] = v
+	}
+	for k, v := range res.Bytes {
+		merged.Bytes[k] += v
+	}
+	merged.Commits += res.Commits
+	merged.Files += res.Files
+	merged.Lines += res.Lines
+	if newHead := compareHeadSHA(cmp); newHead != "" {
+		merged.HeadSHA = newHead
+	}
+	return merged, foldApplied, nil
+}
+
+func compareHeadSHA(cmp *github.CommitsComparison) string {
+	if n := len(cmp.Commits); n > 0 {
+		return cmp.Commits[n-1].GetSHA()
+	}
+	return ""
+}
+
 func accumulateCommit(res *walkResult, files []*github.CommitFile) {
 	for _, f := range files {
 		added := f.GetAdditions()

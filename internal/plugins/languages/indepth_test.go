@@ -10,6 +10,20 @@ import (
 	"github.com/twangodev/gmetrics/internal/plugin"
 )
 
+func TestSelectAuthoredSHAs(t *testing.T) {
+	preds := []string{"octocat"}
+	commits := []*github.RepositoryCommit{
+		{SHA: github.String("a"), Commit: &github.Commit{Author: &github.CommitAuthor{
+			Name: github.String("Octocat"), Email: github.String("octo@x")}}},
+		{SHA: github.String("b"), Commit: &github.Commit{Author: &github.CommitAuthor{
+			Name: github.String("Someone Else"), Email: github.String("nope@x")}}},
+	}
+	got := selectAuthoredSHAs(commits, preds)
+	if len(got) != 1 || got[0] != "a" {
+		t.Fatalf("want [a], got %v", got)
+	}
+}
+
 func TestRepoTaskCarriesWatermarkFields(t *testing.T) {
 	var rt repoTask
 	rt.PushedAt = "2026-05-26T00:00:00Z"
