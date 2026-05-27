@@ -7,20 +7,16 @@
 
 A Go port of [lowlighter/metrics](https://github.com/lowlighter/metrics) for the SVG output path.
 
-## Caching indepth language stats
-
-`plugin_languages_indepth` keeps an incremental cache so each run only processes
-commits added since the previous run. Persist it across runs with `actions/cache`:
+## Usage
 
 ```yaml
-- uses: actions/cache@v4
-  with:
-    path: .gmetrics-cache
-    key: gmetrics-languages-${{ github.run_id }}
-    restore-keys: gmetrics-languages-
 - uses: twangodev/gmetrics@v1
   with:
     token: ${{ secrets.METRICS_TOKEN }}
     plugin_languages: 'yes'
     plugin_languages_indepth: 'yes'
 ```
+
+When `plugin_languages_indepth` is enabled the action caches per-repo language
+stats across runs automatically, so each run only processes commits added since
+the previous one. No extra workflow steps are required.
