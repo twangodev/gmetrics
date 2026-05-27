@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -8,6 +9,30 @@ import (
 
 	"go.yaml.in/yaml/v3"
 )
+
+const inputsJSONEnv = "GMETRICS_INPUTS"
+
+func inputsJSONEntries(environ []string) []string {
+	var blob string
+	for _, kv := range environ {
+		if v, ok := strings.CutPrefix(kv, inputsJSONEnv+"="); ok {
+			blob = v
+			break
+		}
+	}
+	if blob == "" {
+		return nil
+	}
+	var m map[string]string
+	if json.Unmarshal([]byte(blob), &m) != nil {
+		return nil
+	}
+	out := make([]string, 0, len(m))
+	for k, v := range m {
+		out = append(out, "INPUT_"+strings.ToUpper(k)+"="+v)
+	}
+	return out
+}
 
 // readFile is a thin os.ReadFile wrapper exposed as a package-private
 // helper so tests can stub it out if needed.
@@ -152,6 +177,7 @@ func setNested(root map[string]any, path string, value any) {
 // cause a config-load failure.
 func envToYAML(environ []string) ([]byte, error) {
 	root := map[string]any{}
+	environ = append(inputsJSONEntries(environ), environ...)
 	for _, kv := range environ {
 		eq := strings.IndexByte(kv, '=')
 		if eq < 0 {

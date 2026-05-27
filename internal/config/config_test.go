@@ -66,6 +66,27 @@ func TestLoadFromEnv_BasicFields(t *testing.T) {
 	require.Equal(t, 12, cfg.Plugins.People.Limit)
 }
 
+func TestLoadFromEnv_GmetricsInputsJSON(t *testing.T) {
+	blob := `{"user":"bob","plugin_languages":"yes","plugin_languages_indepth_cache":".cache/x.json","plugin_people_limit":"7"}`
+	cfg, err := config.LoadFromEnv([]string{inputsEnvKV(blob)})
+	require.NoError(t, err)
+	require.Equal(t, "bob", cfg.User)
+	require.True(t, cfg.Plugins.Languages.Enabled)
+	require.Equal(t, ".cache/x.json", cfg.Plugins.Languages.IndepthCache)
+	require.Equal(t, 7, cfg.Plugins.People.Limit)
+}
+
+func TestLoadFromEnv_ExplicitInputOverridesJSON(t *testing.T) {
+	cfg, err := config.LoadFromEnv([]string{
+		inputsEnvKV(`{"user":"frfrom-json"}`),
+		"INPUT_USER=from-explicit",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "from-explicit", cfg.User)
+}
+
+func inputsEnvKV(blob string) string { return "GMETRICS_INPUTS=" + blob }
+
 func TestLoadFromEnv_LanguagesIndepthCache(t *testing.T) {
 	t.Setenv("INPUT_PLUGIN_LANGUAGES_INDEPTH_CACHE", ".cache/x.json")
 
