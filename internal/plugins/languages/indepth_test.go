@@ -20,10 +20,12 @@ func TestSelectAuthoredSHAs(t *testing.T) {
 			Name: github.String("Octocat"), Email: github.String("octo@x")}}},
 		{SHA: github.String("b"), Commit: &github.Commit{Author: &github.CommitAuthor{
 			Name: github.String("Someone Else"), Email: github.String("nope@x")}}},
+		{SHA: github.String("m"), Parents: []*github.Commit{{}, {}}, Commit: &github.Commit{Author: &github.CommitAuthor{
+			Name: github.String("Octocat"), Email: github.String("octo@x")}}},
 	}
 	got := selectAuthoredSHAs(commits, preds)
 	if len(got) != 1 || got[0] != "a" {
-		t.Fatalf("want [a], got %v", got)
+		t.Fatalf("want [a] (merge commit m excluded), got %v", got)
 	}
 }
 

@@ -719,6 +719,9 @@ func walkRepoViaAPI(ctx context.Context, env *plugin.Env, owner, name string, pr
 func selectAuthoredSHAs(commits []*github.RepositoryCommit, preds []string) []string {
 	var out []string
 	for _, c := range commits {
+		if len(c.Parents) > 1 {
+			continue
+		}
 		a := c.GetCommit().GetAuthor()
 		if authorMatches(preds, a.GetName(), a.GetEmail()) {
 			out = append(out, c.GetSHA())
