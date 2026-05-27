@@ -165,8 +165,58 @@ inputs:
     default: '0'
 
 runs:
-  using: docker
-  image: docker://ghcr.io/twangodev/gmetrics:latest
+  using: composite
+  steps:
+    - if: ${{ inputs.plugin_languages_indepth == 'yes' || inputs.plugin_languages_indepth == 'true' || inputs.plugin_languages_indepth == '1' || inputs.plugin_languages_indepth == 'on' }}
+      uses: actions/cache@v4
+      with:
+        path: .gmetrics-cache
+        key: gmetrics-languages-${{ github.run_id }}
+        restore-keys: gmetrics-languages-
+    - uses: docker://ghcr.io/twangodev/gmetrics:latest
+      env:
+        INPUT_TOKEN: ${{ inputs.token }}
+        INPUT_USER: ${{ inputs.user }}
+        INPUT_FILENAME: ${{ inputs.filename }}
+        INPUT_OUTPUT_ACTION: ${{ inputs.output_action }}
+        INPUT_BASE: ${{ inputs.base }}
+        INPUT_BASE_HIREABLE: ${{ inputs.base_hireable }}
+        INPUT_BASE_INDEPTH: ${{ inputs.base_indepth }}
+        INPUT_COMMITS_AUTHORING: ${{ inputs.commits_authoring }}
+        INPUT_REPOSITORIES: ${{ inputs.repositories }}
+        INPUT_REPOSITORIES_BATCH: ${{ inputs.repositories_batch }}
+        INPUT_REPOSITORIES_AFFILIATIONS: ${{ inputs.repositories_affiliations }}
+        INPUT_PLUGIN_LANGUAGES: ${{ inputs.plugin_languages }}
+        INPUT_PLUGIN_LANGUAGES_IGNORED: ${{ inputs.plugin_languages_ignored }}
+        INPUT_PLUGIN_LANGUAGES_LIMIT: ${{ inputs.plugin_languages_limit }}
+        INPUT_PLUGIN_LANGUAGES_SECTIONS: ${{ inputs.plugin_languages_sections }}
+        INPUT_PLUGIN_LANGUAGES_DETAILS: ${{ inputs.plugin_languages_details }}
+        INPUT_PLUGIN_LANGUAGES_OTHER: ${{ inputs.plugin_languages_other }}
+        INPUT_PLUGIN_LANGUAGES_INDEPTH: ${{ inputs.plugin_languages_indepth }}
+        INPUT_PLUGIN_LANGUAGES_INDEPTH_CACHE: ${{ inputs.plugin_languages_indepth_cache }}
+        INPUT_PLUGIN_PEOPLE: ${{ inputs.plugin_people }}
+        INPUT_PLUGIN_PEOPLE_TYPES: ${{ inputs.plugin_people_types }}
+        INPUT_PLUGIN_PEOPLE_LIMIT: ${{ inputs.plugin_people_limit }}
+        INPUT_PLUGIN_PEOPLE_SIZE: ${{ inputs.plugin_people_size }}
+        INPUT_PLUGIN_WAKATIME: ${{ inputs.plugin_wakatime }}
+        INPUT_PLUGIN_WAKATIME_TOKEN: ${{ inputs.plugin_wakatime_token }}
+        INPUT_PLUGIN_WAKATIME_URL: ${{ inputs.plugin_wakatime_url }}
+        INPUT_PLUGIN_WAKATIME_USER: ${{ inputs.plugin_wakatime_user }}
+        INPUT_PLUGIN_WAKATIME_DAYS: ${{ inputs.plugin_wakatime_days }}
+        INPUT_PLUGIN_WAKATIME_SECTIONS: ${{ inputs.plugin_wakatime_sections }}
+        INPUT_PLUGIN_WAKATIME_LIMIT: ${{ inputs.plugin_wakatime_limit }}
+        INPUT_PLUGIN_MUSIC: ${{ inputs.plugin_music }}
+        INPUT_PLUGIN_MUSIC_PROVIDER: ${{ inputs.plugin_music_provider }}
+        INPUT_PLUGIN_MUSIC_MODE: ${{ inputs.plugin_music_mode }}
+        INPUT_PLUGIN_MUSIC_USER: ${{ inputs.plugin_music_user }}
+        INPUT_PLUGIN_MUSIC_TOKEN: ${{ inputs.plugin_music_token }}
+        INPUT_PLUGIN_MUSIC_LIMIT: ${{ inputs.plugin_music_limit }}
+        INPUT_PLUGIN_STEAM: ${{ inputs.plugin_steam }}
+        INPUT_PLUGIN_STEAM_TOKEN: ${{ inputs.plugin_steam_token }}
+        INPUT_PLUGIN_STEAM_USER: ${{ inputs.plugin_steam_user }}
+        INPUT_PLUGIN_STEAM_SECTIONS: ${{ inputs.plugin_steam_sections }}
+        INPUT_PLUGIN_STEAM_RECENT_GAMES_LIMIT: ${{ inputs.plugin_steam_recent_games_limit }}
+        INPUT_PLUGIN_STEAM_ACHIEVEMENTS_LIMIT: ${{ inputs.plugin_steam_achievements_limit }}
 
 branding:
   icon: bar-chart-2
