@@ -28,7 +28,9 @@ func TestLoadCacheMissingOrCorruptReturnsEmpty(t *testing.T) {
 		t.Fatal("missing file should yield empty cache")
 	}
 	bad := filepath.Join(t.TempDir(), "bad.json")
-	_ = writeFileString(bad, "{not json")
+	if err := writeFileString(bad, "{not json"); err != nil {
+		t.Fatal(err)
+	}
 	if got := loadCache(bad); len(got.Repos) != 0 {
 		t.Fatal("corrupt file should yield empty cache")
 	}
