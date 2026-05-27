@@ -72,9 +72,9 @@ func TestWalkTaskHonorsPerRepoBudget(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		_, _, _ = withRepoBudget(context.Background(), func(ctx context.Context) (walkResult, string, error) {
+		_ = withRepoBudget(context.Background(), func(ctx context.Context) error {
 			<-ctx.Done()
-			return walkResult{}, "", ctx.Err()
+			return ctx.Err()
 		})
 		close(done)
 	}()

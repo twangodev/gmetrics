@@ -232,70 +232,72 @@ func fetchIndepth(ctx context.Context, env *plugin.Env, cfg Config) (Data, error
 	for _, t := range tasks {
 		t := t
 		g.Go(func() error {
-			t0 := time.Now()
-			owner, name := splitFullName(t.FullName)
-			cacheMu.Lock()
-			prev, hit := cache.Repos[t.FullName]
-			cacheMu.Unlock()
+			return withRepoBudget(gctx, func(gctx context.Context) error {
+				t0 := time.Now()
+				owner, name := splitFullName(t.FullName)
+				cacheMu.Lock()
+				prev, hit := cache.Repos[t.FullName]
+				cacheMu.Unlock()
 
-			if env.Log != nil && !quiet {
-				env.Log.Info("languages: walking",
-					"repo", t.FullName, "source", t.Source, "size_kb", t.SizeKB)
-			}
+				if env.Log != nil && !quiet {
+					env.Log.Info("languages: walking",
+						"repo", t.FullName, "source", t.Source, "size_kb", t.SizeKB)
+				}
 
-			entry, source, err := resolveRepo(t, prev, hit,
-				func() (walkResult, string, error) { return walkTask(gctx, env, t, preds, login) },
-				func(base repoEntry) (repoEntry, foldOutcome, error) {
-					return walkRepoViaCompare(gctx, env, owner, name, base.HeadSHA, t.DefaultBranch, preds, base)
-				},
-			)
-			n := atomic.AddInt32(&done, 1)
-			if err != nil {
-				kind, reason := classifyWalkErr(err)
-				if kind == walkErrNoAccess {
-					atomic.AddInt32(&skippedNoAccess, 1)
+				entry, source, err := resolveRepo(t, prev, hit,
+					func() (walkResult, string, error) { return walkTask(gctx, env, t, preds, login) },
+					func(base repoEntry) (repoEntry, foldOutcome, error) {
+						return walkRepoViaCompare(gctx, env, owner, name, base.HeadSHA, t.DefaultBranch, preds, base)
+					},
+				)
+				n := atomic.AddInt32(&done, 1)
+				if err != nil {
+					kind, reason := classifyWalkErr(err)
+					if kind == walkErrNoAccess {
+						atomic.AddInt32(&skippedNoAccess, 1)
+						return nil
+					}
+					if kind == walkErrRateLimit {
+						atomic.AddInt32(&failedRateLimit, 1)
+					}
+					if env.Log != nil {
+						repo := t.FullName
+						if quiet {
+							repo = "***"
+						}
+						env.Log.Warn("languages: walk failed",
+							"repo", repo, "i", n, "total", total,
+							"dur_ms", time.Since(t0).Milliseconds(), "reason", reason)
+					}
 					return nil
 				}
-				if kind == walkErrRateLimit {
-					atomic.AddInt32(&failedRateLimit, 1)
-				}
-				if env.Log != nil {
-					repo := t.FullName
-					if quiet {
-						repo = "***"
+
+				if source != "cache" && source != "fold" && entry.HeadSHA == "" {
+					if h := resolveHeadSHA(gctx, env, owner, name, t.DefaultBranch); h != "" {
+						entry.HeadSHA = h
 					}
-					env.Log.Warn("languages: walk failed",
-						"repo", repo, "i", n, "total", total,
-						"dur_ms", time.Since(t0).Milliseconds(), "reason", reason)
+				}
+
+				atomic.AddInt64(&totalAuthored, int64(entry.Commits))
+				atomic.AddInt64(&totalFiles, int64(entry.Files))
+				atomic.AddInt64(&totalLines, int64(entry.Lines))
+				mu.Lock()
+				for lang, b := range entry.Bytes {
+					bytes[lang] += b
+				}
+				mu.Unlock()
+				cacheMu.Lock()
+				cache.Repos[t.FullName] = entry
+				cacheMu.Unlock()
+
+				if env.Log != nil && !quiet {
+					env.Log.Info("languages: walked",
+						"repo", t.FullName, "i", n, "total", total,
+						"source", source, "dur_ms", time.Since(t0).Milliseconds(),
+						"authored", entry.Commits, "langs", len(entry.Bytes))
 				}
 				return nil
-			}
-
-			if source != "cache" && source != "fold" && entry.HeadSHA == "" {
-				if h := resolveHeadSHA(gctx, env, owner, name, t.DefaultBranch); h != "" {
-					entry.HeadSHA = h
-				}
-			}
-
-			atomic.AddInt64(&totalAuthored, int64(entry.Commits))
-			atomic.AddInt64(&totalFiles, int64(entry.Files))
-			atomic.AddInt64(&totalLines, int64(entry.Lines))
-			mu.Lock()
-			for lang, b := range entry.Bytes {
-				bytes[lang] += b
-			}
-			mu.Unlock()
-			cacheMu.Lock()
-			cache.Repos[t.FullName] = entry
-			cacheMu.Unlock()
-
-			if env.Log != nil && !quiet {
-				env.Log.Info("languages: walked",
-					"repo", t.FullName, "i", n, "total", total,
-					"source", source, "dur_ms", time.Since(t0).Milliseconds(),
-					"authored", entry.Commits, "langs", len(entry.Bytes))
-			}
-			return nil
+			})
 		})
 	}
 
@@ -579,36 +581,34 @@ func buildRepoTasks(ctx context.Context, env *plugin.Env, login string, cfg Conf
 	return tasks, nil
 }
 
-func withRepoBudget(ctx context.Context, fn func(context.Context) (walkResult, string, error)) (walkResult, string, error) {
+func withRepoBudget(ctx context.Context, fn func(context.Context) error) error {
 	ctx, cancel := context.WithTimeout(ctx, perRepoBudget)
 	defer cancel()
 	return fn(ctx)
 }
 
 func walkTask(ctx context.Context, env *plugin.Env, t repoTask, preds []string, login string) (walkResult, string, error) {
-	return withRepoBudget(ctx, func(ctx context.Context) (walkResult, string, error) {
-		owner, name := splitFullName(t.FullName)
+	owner, name := splitFullName(t.FullName)
 
-		if t.Source == "contributed" && env.REST != nil {
-			if count, err := probeAuthorCommitCount(ctx, env, owner, name, login); err == nil && count < apiThreshold {
-				res, err := walkRepoViaAPI(ctx, env, owner, name, preds)
-				return res, "api", err
-			}
+	if t.Source == "contributed" && env.REST != nil {
+		if count, err := probeAuthorCommitCount(ctx, env, owner, name, login); err == nil && count < apiThreshold {
+			res, err := walkRepoViaAPI(ctx, env, owner, name, preds)
+			return res, "api", err
 		}
+	}
 
-		res, err := walkRepo(ctx, authCloneURL(t.CloneURL, env.Token), preds)
-		if err == nil {
-			return res, "clone", nil
-		}
+	res, err := walkRepo(ctx, authCloneURL(t.CloneURL, env.Token), preds)
+	if err == nil {
+		return res, "clone", nil
+	}
 
-		if env.REST != nil && owner != "" && name != "" {
-			fbRes, fbErr := walkRepoViaAPI(ctx, env, owner, name, preds)
-			if fbErr == nil {
-				return fbRes, "api-fallback", nil
-			}
+	if env.REST != nil && owner != "" && name != "" {
+		fbRes, fbErr := walkRepoViaAPI(ctx, env, owner, name, preds)
+		if fbErr == nil {
+			return fbRes, "api-fallback", nil
 		}
-		return res, "clone", err
-	})
+	}
+	return res, "clone", err
 }
 
 type contribRepo struct {
