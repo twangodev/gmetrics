@@ -20,7 +20,7 @@ type Config struct {
 	// Token is the Last.fm API key (see https://www.last.fm/api/account/create).
 	Token string
 	// Limit caps the number of returned tracks. Last.fm allows up to 200;
-	// gmetrics typically uses 4 to keep the card compact.
+	// gmetrics defaults to 8 so the card renders a 2-column 4-row grid.
 	Limit int
 	// URL is an optional override of the Last.fm API base URL. When empty
 	// defaultLastfmURL is used. The field exists so tests can swap in a
@@ -29,12 +29,13 @@ type Config struct {
 }
 
 // defaultConfig returns a Config with the user's documented defaults: the
-// Last.fm provider, the "recent" mode, and a 4-track limit. All other
-// fields are zero-valued and must be supplied by the user.
+// Last.fm provider, the "recent" mode, and an 8-track limit so the card
+// renders a 2-column grid. All other fields are zero-valued and must be
+// supplied by the user.
 func defaultConfig() Config {
 	return Config{
 		Provider: "lastfm",
 		Mode:     "recent",
-		Limit:    4,
+		Limit:    8,
 	}
 }

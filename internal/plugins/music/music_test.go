@@ -120,20 +120,19 @@ func TestFetch_LastfmHappyPath(t *testing.T) {
 	require.Empty(t, data.Tracks[1].ArtworkB64)
 }
 
-// TestRender_FourTracks_NonEmpty exercises the rendering path with the
-// canonical 4-track payload, including a track whose artwork is missing
-// (placeholder branch) and a track with no PlayedAt (skipped <text>
-// branch). We only assert the body is non-empty and the dimensions match
-// the spec's formula; deeper layout assertions belong in golden tests.
-func TestRender_FourTracks_NonEmpty(t *testing.T) {
+// TestRender_FourTracks_Grid exercises the 2-column grid layout with a
+// 4-track payload (one missing artwork to hit the placeholder branch). We
+// only assert the body is non-empty and the dimensions match the formula;
+// deeper layout assertions belong in golden tests.
+func TestRender_FourTracks_Grid(t *testing.T) {
 	data := music.Data{
 		Mode:     "recent",
 		Provider: "lastfm",
 		Tracks: []music.Track{
-			{Name: "Track One", Artist: "Artist A", PlayedAt: "now playing"},
-			{Name: "Track Two", Artist: "Artist B", PlayedAt: "2024-01-01 00:00 UTC", ArtworkB64: "data:image/png;base64,AAAA"},
-			{Name: "Track Three", Artist: "Artist C", PlayedAt: ""},
-			{Name: "Track <four>", Artist: "Artist & D", PlayedAt: "2024-02-02 02:02 UTC"},
+			{Name: "Track One", Artist: "Artist A"},
+			{Name: "Track Two", Artist: "Artist B", ArtworkB64: "data:image/png;base64,AAAA"},
+			{Name: "Track Three", Artist: "Artist C"},
+			{Name: "Track <four>", Artist: "Artist & D"},
 		},
 	}
 
@@ -142,30 +141,38 @@ func TestRender_FourTracks_NonEmpty(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, frag.Body, "render body must be non-empty")
 	require.Equal(t, 440, frag.Width)
-	// New header layout: h2 (16px) baseline + h3 (12px) baseline below it,
-	// totalling a 48px header block; followed by 4 track rows × 40px and
-	// the spec's 8px trailing pad. 48 + 160 + 8 = 216.
-	require.Equal(t, 216, frag.Height)
+	// 4 tracks in a 2-column grid = 2 rows. Header block 48 + 2*40 row + 8
+	// trailing pad = 136.
+	require.Equal(t, 136, frag.Height)
 
-	// Header and track text are rendered as glyph <path> elements (text-as-path)
-	// so we can't grep for the literal "Recently Played" / track-name strings.
-	// Instead, assert the structural pieces we still emit verbatim.
-	// The first track has no artwork URL -> placeholder rect.
+	// Placeholder rect for the first track (no artwork URL); <image> for
+	// the second (has artwork).
 	require.Contains(t, frag.Body, "<rect")
-	// The second track has artwork -> <image>.
 	require.Contains(t, frag.Body, "<image")
-	// All four rows are emitted.
 	require.Equal(t, 4, strings.Count(frag.Body, `class="music-row"`))
-	// Text-as-path: two header lines (h2 + h3) plus three text lines per
-	// row (name, artist, played-at), one of which is omitted for the third
-	// track (PlayedAt empty). Total = 2 + 3 + 3 + 2 + 3 = 13 <path>.
-	require.GreaterOrEqual(t, strings.Count(frag.Body, "<path"), 13,
-		"expected at least 13 <path> elements (header + per-row text), got %d", strings.Count(frag.Body, "<path"))
-	// The h2 octicon and h3 broadcast octicon are emitted as inline <svg>
-	// elements; assert they're present so a regression that drops the icon
-	// glyphs is caught here.
+	// 2 header text paths + 2 per row (name, artist) * 4 = 10 minimum.
+	require.GreaterOrEqual(t, strings.Count(frag.Body, "<path"), 10,
+		"expected at least 10 <path> elements (header + per-row text), got %d", strings.Count(frag.Body, "<path"))
 	require.Equal(t, 2, strings.Count(frag.Body, "<svg"),
-		"expected 2 inline <svg> octicons (music-note h2, broadcast h3)")
+		"expected 2 inline <svg> octicons (h2, broadcast h3)")
+}
+
+// TestRender_EightTracks_Grid verifies that the canonical 8-track payload
+// lays out as a 4-row, 2-column grid with the expected fragment height.
+func TestRender_EightTracks_Grid(t *testing.T) {
+	tracks := make([]music.Track, 8)
+	for i := range tracks {
+		tracks[i] = music.Track{Name: "Track", Artist: "Artist"}
+	}
+	data := music.Data{Mode: "recent", Provider: "lastfm", Tracks: tracks}
+
+	p := &music.Plugin{}
+	frag, err := p.Render(nil, data)
+	require.NoError(t, err)
+	require.Equal(t, 440, frag.Width)
+	// 8 tracks / 2 columns = 4 rows. 48 + 4*40 + 8 = 216.
+	require.Equal(t, 216, frag.Height)
+	require.Equal(t, 8, strings.Count(frag.Body, `class="music-row"`))
 }
 
 // TestPlugin_RegisteredAndDecodes confirms the plugin self-registers via

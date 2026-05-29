@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/xml"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/tdewolff/canvas"
@@ -17,22 +18,27 @@ import (
 // constant).
 const fragmentWidth = 440
 
-// Vertical metrics. The header band now mirrors upstream metrics's classic
-// template: a 16px regular h2 ("♪ Recently played") followed by a 14px
-// regular h3 ("From Last.fm"). Each row remains 40px tall (32px artwork
-// plus 4px breathing room top and bottom) with a fixed gap between rows.
-// These constants are also used to compute the final fragment height, which
-// must be exact for the frame composer to position adjacent fragments
-// correctly.
+// Vertical metrics. The header band mirrors upstream metrics's classic
+// template: a 16px h2 ("Recently played") followed by a 12px h3 ("From
+// Last.fm"). Tracks render in a 2-column grid with 40px-tall rows so the
+// 32px album artwork has breathing room above and below; each column is
+// columnWidth wide with a columnGap between them. These constants are also
+// used to compute the final fragment height, which must be exact for the
+// frame composer to position adjacent fragments correctly.
 const (
 	h2BaselineY = 16
 	h3BaselineY = 36
-	headerBlock = 48 // h2 + h3 + small gap before the first track row
+	headerBlock = 48
 	rowHeight   = 40
 	artworkSize = 32
-	textIndent  = artworkSize + 12 // 12px gap between artwork and text
+	textIndent  = artworkSize + 12
 	iconSize    = 16
-	iconGutter  = 8 // gap between the leading h2/h3 icon and its label
+	iconGutter  = 8
+
+	columns          = 2
+	columnGap        = 16
+	columnWidth      = (fragmentWidth - columnGap*(columns-1)) / columns
+	textBaselineGap  = 12
 )
 
 // Render lays out the music card: an h2 + h3 header pair followed by one
@@ -66,10 +72,6 @@ func (*Plugin) Render(env *plugin.Env, raw any) (plugin.Fragment, error) {
 	if err != nil {
 		return plugin.Fragment{}, fmt.Errorf("music: load artist face: %w", err)
 	}
-	playedAtFace, err := render.Face(11, canvas.FontRegular)
-	if err != nil {
-		return plugin.Fragment{}, fmt.Errorf("music: load played-at face: %w", err)
-	}
 
 	var buf bytes.Buffer
 
@@ -81,15 +83,25 @@ func (*Plugin) Render(env *plugin.Env, raw any) (plugin.Fragment, error) {
 	render.EmitOcticon(&buf, 0, h3BaselineY-iconSize+2, iconSize, "broadcast", "#959da5")
 	render.EmitTextPathClass(&buf, iconSize+iconGutter, h3BaselineY, "From "+providerLabel(data.Provider), h3Face, "text-muted")
 
-	// Track rows. The first row starts directly below the header block; the
+	// Vertically center the name+artist text block against the artwork.
+	// The "visible block" we center spans cap-top of the name line down to
+	// the artist baseline (descenders ignored — most artist names lack
+	// them, and including them would visually lift the block).
+	nameBaseY, artistBaseY := centeredTextBaselines(trackNameFace.Metrics())
+
+	// Track grid. Tracks fill the 2-column grid in row-major reading order
+	// (1,2 / 3,4 / ...), starting directly below the header block. The
 	// per-row layout already includes top/bottom breathing room so rows can
 	// sit flush against each other.
 	for i, t := range data.Tracks {
-		y := headerBlock + i*rowHeight
-		writeRow(&buf, t, y, trackNameFace, artistFace, playedAtFace)
+		row, col := i/columns, i%columns
+		x := col * (columnWidth + columnGap)
+		y := headerBlock + row*rowHeight
+		writeRow(&buf, t, x, y, nameBaseY, artistBaseY, trackNameFace, artistFace)
 	}
 
-	height := headerBlock + len(data.Tracks)*rowHeight + 8
+	rows := (len(data.Tracks) + columns - 1) / columns
+	height := headerBlock + rows*rowHeight + 8
 
 	return plugin.Fragment{
 		Body:   buf.String(),
@@ -138,13 +150,14 @@ func providerLabel(p string) string {
 	}
 }
 
-// writeRow emits one track row at the given y offset. The artwork is an
+// writeRow emits one track at the given (x, y) offset. The artwork is an
 // <image> when the base64 URL is non-empty, otherwise a muted rectangle
 // the same size so the layout doesn't shift in test mode (env.HTTP nil).
-func writeRow(buf *bytes.Buffer, t Track, y int, nameFace, artistFace, playedFace *canvas.FontFace) {
-	fmt.Fprintf(buf, `<g class="music-row" transform="translate(0,%d)">`, y)
+// Name and artist are pixel-truncated to fit the column's text area and
+// share the caller-supplied baselines (centered against the artwork).
+func writeRow(buf *bytes.Buffer, t Track, x, y, nameBaseY, artistBaseY int, nameFace, artistFace *canvas.FontFace) {
+	fmt.Fprintf(buf, `<g class="music-row" transform="translate(%d,%d)">`, x, y)
 
-	// Artwork
 	if t.ArtworkB64 != "" {
 		fmt.Fprintf(buf,
 			`<image x="0" y="0" width="%d" height="%d" href="%s"><title>%s</title></image>`,
@@ -157,20 +170,20 @@ func writeRow(buf *bytes.Buffer, t Track, y int, nameFace, artistFace, playedFac
 		)
 	}
 
-	// Track name: 12pt bold, baseline at 12 so the descender doesn't
-	// collide with the artist line below.
-	render.EmitTextPath(buf, textIndent, 12, t.Name, nameFace)
-	// Artist: 11pt muted, baseline at 24.
-	render.EmitTextPathClass(buf, textIndent, 24, t.Artist, artistFace, "text-muted")
-	// PlayedAt: muted, baseline at 35. Skipped when empty so we don't emit
-	// a stray empty <path/> for tracks without timestamps. (EmitTextPath
-	// already short-circuits on empty input but checking up front keeps
-	// the intent explicit.)
-	if t.PlayedAt != "" {
-		render.EmitTextPathClass(buf, textIndent, 35, t.PlayedAt, playedFace, "text-muted")
-	}
+	textWidth := float64(columnWidth - textIndent)
+	render.EmitTextPath(buf, textIndent, nameBaseY, render.TruncateToWidth(t.Name, nameFace, textWidth), nameFace)
+	render.EmitTextPathClass(buf, textIndent, artistBaseY, render.TruncateToWidth(t.Artist, artistFace, textWidth), artistFace, "text-muted")
 
 	fmt.Fprint(buf, `</g>`)
+}
+
+// centeredTextBaselines returns the (name, artist) baseline y-coordinates
+// such that the cap-top of the name line and the baseline of the artist
+// line are symmetric around the artwork's vertical center.
+func centeredTextBaselines(nm canvas.FontMetrics) (int, int) {
+	block := textBaselineGap + nm.CapHeight
+	nameY := math.Round((float64(artworkSize)-block)/2 + nm.CapHeight)
+	return int(nameY), int(nameY) + textBaselineGap
 }
 
 // xmlEscape escapes content for use as text inside an SVG element. This
