@@ -22,6 +22,14 @@ const avatarSize = 48
 // gameIconSize is the side length of the game icon inside a list row.
 const gameIconSize = 32
 
+// gameIconCornerFrac softens the game-icon corners (a fraction of the 32px
+// box, so ~4px) so the thumbnails aren't razor-sharp squares. gameIconClipID
+// is the shared clipPath id referenced by every icon <image>.
+const (
+	gameIconCornerFrac = 0.125
+	gameIconClipID     = "steam-icon-round"
+)
+
 // Vertical spacing constants shared by every section. iconSize is the
 // width and height of every inline octicon glyph in this plugin; iconGutter
 // is the gap between an icon and the text immediately to its right. These
@@ -70,6 +78,9 @@ func (*Plugin) Render(env *plugin.Env, raw any) (plugin.Fragment, error) {
 
 	var buf bytes.Buffer
 	y := 0
+
+	// Rounded-corner clip shared by every game icon in this card.
+	render.EmitRoundedClip(&buf, gameIconClipID, gameIconCornerFrac)
 
 	// Top-level h2 — "Steam" with the upstream broadcast-tower-shaped icon.
 	// We fall back to the `broadcast` octicon (added for the music card) so
@@ -160,12 +171,12 @@ func writeGameCard(buf *bytes.Buffer, g Game, y int, nameFace, fieldFace *canvas
 	// Icon (or placeholder).
 	if g.IconB64 != "" {
 		fmt.Fprintf(buf,
-			`<image x="0" y="%d" width="%d" height="%d" href="%s"><title>%s</title></image>`,
-			y, gameIconSize, gameIconSize, xmlEscapeAttr(g.IconB64), xmlEscape(g.Name),
+			`<image x="0" y="%d" width="%d" height="%d" href="%s" clip-path="url(#%s)"><title>%s</title></image>`,
+			y, gameIconSize, gameIconSize, xmlEscapeAttr(g.IconB64), gameIconClipID, xmlEscape(g.Name),
 		)
 	} else {
 		fmt.Fprintf(buf,
-			`<rect x="0" y="%d" width="%d" height="%d" rx="3" fill="#d0d7de"><title>%s</title></rect>`,
+			`<rect x="0" y="%d" width="%d" height="%d" rx="4" fill="#d0d7de"><title>%s</title></rect>`,
 			y, gameIconSize, gameIconSize, xmlEscape(g.Name),
 		)
 	}
@@ -175,20 +186,30 @@ func writeGameCard(buf *bytes.Buffer, g Game, y int, nameFace, fieldFace *canvas
 	// in the classic theme) and a 14px semibold weight.
 	render.EmitTextPathClass(buf, textX, y+12, g.Name, nameFace, "text-heading")
 
-	// Info rows. We emit only the fields we have data for so the card
-	// doesn't leave dead vertical space when (e.g.) achievements aren't
-	// populated yet. Playtime is always present; LastPlayed is opportunistic.
+	// Info rows: a muted icon+text line per stat. Only stats we have data
+	// for are emitted, so the card never leaves dead vertical space. The
+	// first (playtime) line is always present; the rest are opportunistic.
 	rowH := 18
 	infoY := y + 16
-	hours := fmt.Sprintf("%.1f hours played", g.PlaytimeHours)
-	render.EmitOcticon(buf, textX, infoY+(rowH-12)/2, 12, "clock", "#959da5")
-	render.EmitTextPathClass(buf, textX+12+6, infoY+12, hours, fieldFace, "text-muted")
-	infoY += rowH
-
-	if g.LastPlayed != "" {
-		render.EmitOcticon(buf, textX, infoY+(rowH-12)/2, 12, "calendar", "#959da5")
-		render.EmitTextPathClass(buf, textX+12+6, infoY+12, "Last played on "+g.LastPlayed, fieldFace, "text-muted")
+	emitInfo := func(icon, text string) {
+		render.EmitOcticon(buf, textX, infoY+(rowH-12)/2, 12, icon, "#959da5")
+		render.EmitTextPathClass(buf, textX+12+6, infoY+12, text, fieldFace, "text-muted")
 		infoY += rowH
+	}
+
+	emitInfo("clock", fmt.Sprintf("%.1f hours played", g.PlaytimeHours))
+	if g.PercentOfTotal > 0 {
+		emitInfo("pulse", formatShare(g.PercentOfTotal))
+	}
+	if g.LastPlayed != "" {
+		emitInfo("calendar", "Last played on "+g.LastPlayed)
+	}
+	if g.Platform != "" {
+		emitInfo("device-desktop", "Mostly on "+g.Platform)
+	}
+	if g.HasAchievements && g.AchTotal > 0 {
+		pct := int(float64(g.AchUnlocked)/float64(g.AchTotal)*100 + 0.5)
+		emitInfo("star", fmt.Sprintf("%d / %d achievements (%d%%)", g.AchUnlocked, g.AchTotal, pct))
 	}
 
 	// Bottom-pad the card. Total card height is max(icon, text-stack) + 6px.
@@ -197,6 +218,16 @@ func writeGameCard(buf *bytes.Buffer, g Game, y int, nameFace, fieldFace *canvas
 		cardH = gameIconSize + 6
 	}
 	return cardH
+}
+
+// formatShare renders a 0..1 playtime share as a percent line, collapsing
+// sub-1% values to "<1%" so a tiny slice doesn't display as a misleading 0%.
+func formatShare(frac float64) string {
+	p := frac * 100
+	if p < 1 {
+		return "<1% of total playtime"
+	}
+	return fmt.Sprintf("%.0f%% of total playtime", p)
 }
 
 // pluralInt returns "s" when v is anything but exactly 1. Mirrors the

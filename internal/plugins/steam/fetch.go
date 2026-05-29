@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"sync"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -136,15 +138,24 @@ func FetchWith(ctx context.Context, hc *http.Client, env *plugin.Env, cfg Config
 	for i := 0; i < limit; i++ {
 		g := mostPlayed[i]
 		data.MostPlayed = append(data.MostPlayed, Game{
-			AppID:         g.AppID,
-			Name:          g.Name,
-			IconB64:       fetchIcon(ctx, env, g.AppID, g.ImgIconURL),
-			PlaytimeHours: float64(g.PlaytimeForever) / minutesPerHour,
+			AppID:          g.AppID,
+			Name:           g.Name,
+			IconB64:        fetchIcon(ctx, env, g.AppID, g.ImgIconURL),
+			PlaytimeHours:  float64(g.PlaytimeForever) / minutesPerHour,
+			LastPlayed:     formatLastPlayed(g.RtimeLastPlayed),
+			PercentOfTotal: shareOfTotal(g.PlaytimeForever, totalMins),
+			Platform:       dominantPlatform(g.PlaytimeWindows, g.PlaytimeMac, g.PlaytimeLinux, g.PlaytimeDeck),
 		})
 	}
 
 	// Recently: take the API order verbatim (Steam already returns it
-	// sorted by recency), trimmed to RecentGamesLimit.
+	// sorted by recency), trimmed to RecentGamesLimit. The recent endpoint
+	// omits rtime_last_played, so join the owned-games list by appid to
+	// recover a last-played date and lifetime playtime for the % stat.
+	ownedByID := make(map[int]ownedGame, len(owned.Response.Games))
+	for _, g := range owned.Response.Games {
+		ownedByID[g.AppID] = g
+	}
 	rlimit := cfg.RecentGamesLimit
 	if rlimit <= 0 {
 		rlimit = 1
@@ -154,15 +165,109 @@ func FetchWith(ctx context.Context, hc *http.Client, env *plugin.Env, cfg Config
 	}
 	for i := 0; i < rlimit; i++ {
 		g := recent.Response.Games[i]
-		data.Recently = append(data.Recently, Game{
+		game := Game{
 			AppID:         g.AppID,
 			Name:          g.Name,
 			IconB64:       fetchIcon(ctx, env, g.AppID, g.ImgIconURL),
 			PlaytimeHours: float64(g.Playtime2Weeks) / minutesPerHour,
-		})
+			Platform:      dominantPlatform(g.PlaytimeWindows, g.PlaytimeMac, g.PlaytimeLinux, g.PlaytimeDeck),
+		}
+		forever := g.PlaytimeForever
+		if o, ok := ownedByID[g.AppID]; ok {
+			game.LastPlayed = formatLastPlayed(o.RtimeLastPlayed)
+			if forever == 0 {
+				forever = o.PlaytimeForever
+			}
+		}
+		game.PercentOfTotal = shareOfTotal(forever, totalMins)
+		data.Recently = append(data.Recently, game)
 	}
 
+	// Achievement counts need one extra call per displayed game; do them
+	// concurrently and best-effort (a private profile or a game without
+	// achievements simply leaves the stat unset).
+	enrichAchievements(ctx, hc, env, cfg, data.MostPlayed)
+	enrichAchievements(ctx, hc, env, cfg, data.Recently)
+
 	return data, nil
+}
+
+// shareOfTotal returns mins/totalMins clamped to [0,1], or 0 when the total
+// is unknown.
+func shareOfTotal(mins, totalMins int) float64 {
+	if totalMins <= 0 || mins <= 0 {
+		return 0
+	}
+	if mins > totalMins {
+		return 1
+	}
+	return float64(mins) / float64(totalMins)
+}
+
+// formatLastPlayed renders a Unix timestamp as an absolute date. An absolute
+// date (rather than "3 days ago") keeps the rendered card deterministic for
+// golden tests and stable in a cached SVG.
+func formatLastPlayed(rtime int64) string {
+	if rtime <= 0 {
+		return ""
+	}
+	return time.Unix(rtime, 0).UTC().Format("Jan 2, 2006")
+}
+
+// dominantPlatform returns the label of the most-played platform given the
+// per-platform minute counts, or "" when Steam reports no breakdown. Deck
+// time is a subset of the Linux total, so it's subtracted out to separate
+// "Steam Deck" from desktop "Linux".
+func dominantPlatform(windows, mac, linux, deck int) string {
+	desktopLinux := linux - deck
+	if desktopLinux < 0 {
+		desktopLinux = 0
+	}
+	best, bestMins := "", 0
+	for _, c := range []struct {
+		name string
+		mins int
+	}{
+		{"Windows", windows},
+		{"macOS", mac},
+		{"Linux", desktopLinux},
+		{"Steam Deck", deck},
+	} {
+		if c.mins > bestMins {
+			best, bestMins = c.name, c.mins
+		}
+	}
+	return best
+}
+
+// enrichAchievements fills the achievement counts on each game in place,
+// fetching concurrently. hc is the Steam API client; when nil (render-only
+// paths) the function is a no-op. Per-game failures are logged at debug and
+// otherwise ignored.
+func enrichAchievements(ctx context.Context, hc *http.Client, env *plugin.Env, cfg Config, games []Game) {
+	if hc == nil {
+		return
+	}
+	var wg sync.WaitGroup
+	for i := range games {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			unlocked, total, err := getAchievements(ctx, hc, cfg, games[i].AppID)
+			if err != nil {
+				if env != nil && env.Log != nil {
+					env.Log.Debug("steam: achievements unavailable", "appid", games[i].AppID, "err", err)
+				}
+				return
+			}
+			if total > 0 {
+				games[i].HasAchievements = true
+				games[i].AchUnlocked = unlocked
+				games[i].AchTotal = total
+			}
+		}(i)
+	}
+	wg.Wait()
 }
 
 // fetchIcon returns a data: URL for a game icon, or the empty string when
