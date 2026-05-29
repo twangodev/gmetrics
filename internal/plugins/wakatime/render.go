@@ -29,11 +29,10 @@ const (
 	iconSize    = 16
 	iconGutter  = 8
 
-	graphHeader     = 18
-	graphRowH       = 16
-	sectionGap      = 8
-	barHeight       = 8.0
-	barTrackOpacity = 0.15
+	graphHeader = 18
+	graphRowH   = 16
+	sectionGap  = 8
+	barHeight   = 8.0
 
 	bodyFontPt   = 12.0
 	headerFontPt = 14.0
@@ -43,11 +42,10 @@ const (
 	// the two cells. (graphColW * 2 + graphColGap == fragmentWidth.)
 	graphColW   = 210.0
 	graphColGap = 20.0
-	// Within a cell, the layout is: name | bar | percent. The name column is
-	// fixed-width so the bars line up vertically. The percent text sits in
-	// a fixed-width slot on the right; the bar fills whatever's left in
-	// between.
-	graphNameColW    = 70.0
+	// Within a cell, the layout is: name | bar | percent. The name column
+	// shrink-wraps to the widest label per cell (capped at 60% in
+	// drawGraphCell). The percent text sits in a fixed-width slot on the
+	// right; the bar fills whatever's left in between.
 	graphNameBarGap  = 6.0
 	graphBarPctGap   = 6.0
 	graphPercentColW = 32.0
@@ -135,62 +133,68 @@ func buildProseHeader(d Data) (string, int, error) {
 	render.EmitOcticon(&buf, 0, 0, iconSize, "clock", "#0366d6")
 	render.EmitTextPathClass(&buf, iconSize+iconGutter, h2BaselineY, h2Label(d.Days), h2Face, "text-heading")
 
-	// Per-category prose lines. Order matches the upstream classic
-	// template: time, project, language, daily-time, editor, OS. Missing
-	// data simply drops that row. `sections` constrains which lines we
-	// emit so a user that disabled e.g. languages-graphs still sees an
-	// empty languages prose line *only* when "languages" is in sections.
+	// Per-category prose lines, split into 2 columns to mirror the upstream
+	// classic template (and the bar-chart grid below it). Left column gets
+	// total-time / project / language; right gets daily-time / editor / os.
 	sections := stringSet(d.Sections)
-	lines := []proseLine{}
+	textW := float64(graphColW) - float64(iconSize+iconGutter)
+
+	left := []proseLine{}
+	right := []proseLine{}
 	if sections["time"] {
 		hours := int(math.Round(d.TotalHours))
-		lines = append(lines, proseLine{
+		left = append(left, proseLine{
 			icon: "clock",
 			text: fmt.Sprintf("%d coding hour%s recorded", hours, plural(d.TotalHours)),
 		})
 	}
 	if sections["projects"] && len(d.Projects) > 0 {
-		lines = append(lines, proseLine{
+		left = append(left, proseLine{
 			icon: "repo",
-			text: "Working on " + truncate(d.Projects[0].Name, 22),
+			text: render.TruncateToWidth("Working on "+d.Projects[0].Name, lineFace, textW),
 		})
 	}
 	if sections["languages"] && len(d.Languages) > 0 {
-		lines = append(lines, proseLine{
+		left = append(left, proseLine{
 			icon: "code",
-			text: "Mostly coding in " + d.Languages[0].Name,
+			text: render.TruncateToWidth("Mostly coding in "+d.Languages[0].Name, lineFace, textW),
 		})
 	}
 	if sections["time"] {
 		daily := int(math.Round(d.DailyAvgHours))
-		lines = append(lines, proseLine{
+		right = append(right, proseLine{
 			icon: "pulse-triangles",
 			text: fmt.Sprintf("~%d hour%s of coding per day", daily, pluralInt(daily)),
 		})
 	}
 	if sections["editors"] && len(d.Editors) > 0 {
-		lines = append(lines, proseLine{
+		right = append(right, proseLine{
 			icon: "terminal",
-			text: "Coding with " + d.Editors[0].Name,
+			text: render.TruncateToWidth("Coding with "+d.Editors[0].Name, lineFace, textW),
 		})
 	}
 	if sections["os"] && len(d.OSes) > 0 {
-		lines = append(lines, proseLine{
+		right = append(right, proseLine{
 			icon: "device-desktop",
-			text: "Using " + d.OSes[0].Name,
+			text: render.TruncateToWidth("Using "+d.OSes[0].Name, lineFace, textW),
 		})
 	}
 
-	// Emit each prose line. The baseline sits 14px below the line's top so
-	// the 16px icon and the 12px glyphs are visually centred against each
-	// other on a 20px row.
-	for i, ln := range lines {
-		y := h2BlockH + i*proseLineH
-		render.EmitOcticon(&buf, 0, y+(proseLineH-iconSize)/2, iconSize, ln.icon, "#959da5")
-		render.EmitTextPath(&buf, iconSize+iconGutter, y+14, ln.text, lineFace)
+	emitProseColumn := func(col []proseLine, xOffset int) {
+		for i, ln := range col {
+			y := h2BlockH + i*proseLineH
+			render.EmitOcticon(&buf, xOffset, y+(proseLineH-iconSize)/2, iconSize, ln.icon, "#959da5")
+			render.EmitTextPath(&buf, xOffset+iconSize+iconGutter, y+14, ln.text, lineFace)
+		}
 	}
+	emitProseColumn(left, 0)
+	emitProseColumn(right, int(graphColW+graphColGap))
 
-	height := h2BlockH + len(lines)*proseLineH + sectionGap
+	rows := len(left)
+	if len(right) > rows {
+		rows = len(right)
+	}
+	height := h2BlockH + rows*proseLineH + sectionGap
 	return buf.String(), height, nil
 }
 
@@ -372,7 +376,9 @@ func categoryRows(d Data, section string) int {
 
 // drawGraphCell draws a bar-chart cell rooted at (x0, y0) with the given
 // cell width. The header (14px bold) sits at the top; up to N rows of
-// (name | bar | percent) follow underneath.
+// (name | bar | percent) follow underneath. key is the category identifier
+// ("projects" / "languages" / "editors" / "os") and selects which color
+// palette barColorFor uses.
 func drawGraphCell(ctx *canvas.Context, x0, y0, cellW float64, key string, items []Item) {
 	headerFace, err := render.Face(headerFontPt, canvas.FontBold)
 	if err != nil {
@@ -385,26 +391,52 @@ func drawGraphCell(ctx *canvas.Context, x0, y0, cellW float64, key string, items
 	}
 	rowFace.Fill = canvas.Paint{Color: textColor}
 
-	// Header baseline sits a few px below the cell top so it visually aligns
-	// against the bar rows below (which are vertically centred on graphRowH).
-	drawLine(ctx, x0, y0+headerFontPt, headerFace, captionFor(key))
+	// Header text top is anchored to the cell top; drawLine treats its y
+	// argument as the top of the text box (not the baseline), so passing y0
+	// makes the header occupy y0..y0+graphHeader and the bar rows below it
+	// start at y0+graphHeader without overlap.
+	drawLine(ctx, x0, y0, headerFace, captionFor(key))
 	y := y0 + float64(graphHeader)
 
-	// Layout columns inside the cell.
+	// Layout columns inside the cell. The name column shrink-wraps to the
+	// widest label in this cell but caps at 60% of the cell width, so bars
+	// always get at least the remaining ~40%. Labels longer than the cap
+	// are pixel-truncated below.
+	const nameColMaxFrac = 0.60
+	nameColMax := nameColMaxFrac * cellW
+	maxLabel := 0.0
+	for _, it := range items {
+		if w := rowFace.TextWidth(it.Name); w > maxLabel {
+			maxLabel = w
+		}
+	}
+	nameColW := maxLabel
+	if nameColW > nameColMax {
+		nameColW = nameColMax
+	}
 	nameX := x0
-	barX := nameX + graphNameColW + graphNameBarGap
-	barW := cellW - graphNameColW - graphNameBarGap - graphBarPctGap - graphPercentColW
+	pctX := x0 + cellW - graphPercentColW
+	barX := nameX + nameColW + graphNameBarGap
+	barW := pctX - graphBarPctGap - barX
 	if barW < 20 {
 		barW = 20
 	}
-	pctX := barX + barW + graphBarPctGap
+
+	// Vertically center text and bar within the row. drawLine treats its y
+	// argument as the top of the text box, so to land the text's vertical
+	// center at graphRowH/2 we subtract half the face's visible height
+	// (ascent + descent). The bar's top is already barH/2 above the same
+	// center.
+	rm := rowFace.Metrics()
+	textVisualH := rm.Ascent + rm.Descent
+	rowTextOffset := (graphRowH - textVisualH) / 2
 
 	for i, it := range items {
-		rowY := y + graphRowH - 4
-		drawLine(ctx, nameX, rowY, rowFace, truncate(it.Name, 14))
+		rowY := y + rowTextOffset
+		drawLine(ctx, nameX, rowY, rowFace, render.TruncateToWidth(it.Name, rowFace, nameColW))
 
 		barY := y + (graphRowH-barHeight)/2.0
-		drawBarW(ctx, barX, barY, barW, it.Percent, barPalette[i%len(barPalette)])
+		drawBarW(ctx, barX, barY, barW, it.Percent, barColorFor(key, it.Name, i))
 
 		percent := fmt.Sprintf("%d%%", int(it.Percent*100+0.5))
 		drawLine(ctx, pctX, rowY, rowFace, percent)
@@ -424,28 +456,16 @@ func drawLine(ctx *canvas.Context, x, y float64, face *canvas.FontFace, s string
 	ctx.DrawText(x, y, box)
 }
 
-// drawBarW paints both the track (faint background) and the filled portion of
-// a horizontal bar at (x, y) sized (barW × barHeight) with the given
-// normalized fraction (0..1).
+// drawBarW paints only the filled portion of a horizontal bar at (x, y)
+// sized (barW × barHeight) with the given normalized fraction (0..1). The
+// remaining (1 - frac) range is left as the card background — no faint
+// track is drawn.
 func drawBarW(ctx *canvas.Context, x, y, barW, frac float64, fill color.RGBA) {
-	if frac < 0 {
-		frac = 0
+	if frac <= 0 {
+		return
 	}
 	if frac > 1 {
 		frac = 1
-	}
-
-	// Track
-	track := fill
-	track.A = uint8(float64(track.A) * barTrackOpacity)
-	ctx.Push()
-	ctx.SetFillColor(track)
-	ctx.SetStrokeColor(color.RGBA{})
-	ctx.DrawPath(x, y, canvas.Rectangle(barW, barHeight))
-	ctx.Pop()
-
-	if frac == 0 {
-		return
 	}
 	ctx.Push()
 	ctx.SetFillColor(fill)
