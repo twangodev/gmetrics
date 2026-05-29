@@ -91,6 +91,19 @@ func EmitTextPathRightAlignedClass(w io.Writer, rightX, baselineY int, s string,
 	EmitTextPathClass(w, x, baselineY, s, face, class)
 }
 
+// EmitRoundedClip writes a reusable <clipPath> that rounds the corners of
+// any element referencing it via clip-path="url(#id)". The radius is given
+// in objectBoundingBox units (a fraction of the referencing element's own
+// bounding box), so one def rounds every image identically regardless of
+// each image's size or absolute position — useful for lists of same-shaped
+// thumbnails. radiusFrac of 0.125 rounds a 32px box by 4px.
+func EmitRoundedClip(w io.Writer, id string, radiusFrac float64) {
+	fmt.Fprintf(w,
+		`<clipPath id="%s" clipPathUnits="objectBoundingBox"><rect width="1" height="1" rx="%g" ry="%g"/></clipPath>`,
+		id, radiusFrac, radiusFrac,
+	)
+}
+
 // TruncateToWidth returns s clipped (rune-aware) so its rendered width
 // under face fits within maxW pixels, appending an ellipsis when clipped.
 // Binary-searches the largest prefix that still fits with the ellipsis.
