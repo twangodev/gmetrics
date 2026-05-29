@@ -49,6 +49,31 @@ func TestRender_AllSections_NonEmpty(t *testing.T) {
 	require.GreaterOrEqual(t, strings.Count(frag.Body, "<path"), 20)
 }
 
+// TestFetch_EmptySections_SkipsGraphQL verifies base short-circuits before
+// any GraphQL work when no sections are configured (base: ''). It passes a
+// nil GraphQL client — which Fetch would otherwise reject — to prove the
+// query is never attempted, so a plugins-only card runs with no GitHub token.
+func TestFetch_EmptySections_SkipsGraphQL(t *testing.T) {
+	t.Parallel()
+
+	env := &plugin.Env{Login: "alice"} // GraphQL deliberately nil
+	data, err := Fetch(context.Background(), env, Config{})
+	require.NoError(t, err)
+	require.Empty(t, data.Sections)
+	require.Equal(t, plugin.UserContext{}, data.User, "no user should be fetched")
+}
+
+// TestRender_NoSections_EmptyFragment verifies base renders an empty-bodied
+// fragment for an empty section list so the engine can omit it.
+func TestRender_NoSections_EmptyFragment(t *testing.T) {
+	t.Parallel()
+
+	frag, err := Render(nil, Data{})
+	require.NoError(t, err)
+	require.Empty(t, frag.Body)
+	require.Zero(t, frag.Height)
+}
+
 func TestFetch_PopulatesUser(t *testing.T) {
 	t.Parallel()
 
