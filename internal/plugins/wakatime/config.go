@@ -34,7 +34,10 @@ func defaultConfig() Config {
 		User:     "current",
 		Days:     7,
 		Limit:    5,
-		Sections: []string{"time", "projects", "languages", "editors", "os"},
+		Sections: []string{
+			"time", "projects", "languages", "editors", "os",
+			"projects-graphs", "languages-graphs", "editors-graphs", "os-graphs",
+		},
 	}
 }
 
