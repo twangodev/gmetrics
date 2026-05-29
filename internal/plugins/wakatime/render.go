@@ -63,10 +63,13 @@ var barPalette = []color.RGBA{
 	{R: 0x4d, G: 0xd0, B: 0xe1, A: 0xff}, // cyan
 }
 
-var (
-	mutedColor = color.RGBA{R: 0x57, G: 0x60, B: 0x6a, A: 0xff}
-	textColor  = color.RGBA{R: 0x24, G: 0x29, B: 0x2f, A: 0xff}
-)
+// chartTextColor matches the card's body text (#777777 — the EmitTextPath
+// and CSS `text` default used by the prose summary and every other plugin).
+// The bar charts are canvas-rendered, so they can't inherit the CSS class
+// and must set this explicitly; without it the rows render in a near-black
+// that nothing else on the card uses. Header rows reuse the same gray and
+// rely on their bold, larger face for hierarchy (as the music card does).
+var chartTextColor = color.RGBA{R: 0x77, G: 0x77, B: 0x77, A: 0xff}
 
 // renderFragment composes the wakatime SVG fragment. The output stacks an
 // upstream-style prose header (h2 title + per-category one-line summaries)
@@ -384,12 +387,12 @@ func drawGraphCell(ctx *canvas.Context, x0, y0, cellW float64, key string, items
 	if err != nil {
 		return
 	}
-	headerFace.Fill = canvas.Paint{Color: textColor}
+	headerFace.Fill = canvas.Paint{Color: chartTextColor}
 	rowFace, err := render.Face(bodyFontPt, canvas.FontRegular)
 	if err != nil {
 		return
 	}
-	rowFace.Fill = canvas.Paint{Color: textColor}
+	rowFace.Fill = canvas.Paint{Color: chartTextColor}
 
 	// Header text top is anchored to the cell top; drawLine treats its y
 	// argument as the top of the text box (not the baseline), so passing y0
