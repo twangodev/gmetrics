@@ -97,8 +97,16 @@ func fetchLastfm(ctx context.Context, env *plugin.Env, cfg Config) (Data, error)
 		return Data{}, fmt.Errorf("music: decode lastfm response: %w", err)
 	}
 
+	// Last.fm prepends the currently-playing track to the response on top
+	// of the requested limit (so `limit=8` yields 9 entries while a track
+	// is playing). Cap the slice so the rendered grid stays balanced.
+	tracks := parsed.RecentTracks.Track
+	if cfg.Limit > 0 && len(tracks) > cfg.Limit {
+		tracks = tracks[:cfg.Limit]
+	}
+
 	data := Data{Mode: cfg.Mode, Provider: cfg.Provider}
-	for _, raw := range parsed.RecentTracks.Track {
+	for _, raw := range tracks {
 		t := Track{
 			Name:     raw.Name,
 			Artist:   raw.Artist.Text,
