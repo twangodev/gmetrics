@@ -70,7 +70,11 @@ func (e *Engine) Render(ctx context.Context, cfg *config.Config) ([]plugin.Fragm
 		// graceful error fragment instead.
 		return nil, err
 	}
-	frags = append(frags, baseFrag)
+	// base renders an empty body when it has no sections (base: ''); omit it
+	// so a plugins-only card has no leading gap.
+	if baseFrag.Body != "" {
+		frags = append(frags, baseFrag)
+	}
 
 	// 2. Assemble the deterministic list of optional plugins to run.
 	runs := assembleRuns(cfg, e.Env)

@@ -41,6 +41,12 @@ const (
 // now embedded in the header) are silently ignored so config files don't
 // have to keep in lock-step with the renderer.
 func Render(_ *plugin.Env, data Data) (plugin.Fragment, error) {
+	// No sections means base contributes nothing; return an empty-bodied
+	// fragment so the engine can omit it entirely (no stray slot or gap).
+	if len(data.Sections) == 0 {
+		return plugin.Fragment{Width: sectionWidth}, nil
+	}
+
 	// Font faces: heading text is 16px regular (matching upstream h2), row
 	// text is 12px regular, name is 20px bold, login is 14px regular.
 	reg12, err := render.Face(12, canvas.FontRegular)

@@ -92,6 +92,13 @@ func Fetch(ctx context.Context, env *plugin.Env, cfg Config) (Data, error) {
 	d.Hireable = cfg.Hireable
 	d.Metadata.GeneratedAt = time.Now().UTC().Format(time.RFC3339)
 
+	// With no sections to render, base has nothing to draw — skip the GitHub
+	// GraphQL work entirely. This lets a plugins-only card (base: '') run with
+	// token: NOT_NEEDED instead of failing on the base query.
+	if len(cfg.Sections) == 0 {
+		return d, nil
+	}
+
 	if env == nil || env.GraphQL == nil {
 		return d, fmt.Errorf("base: env.GraphQL client is required")
 	}
