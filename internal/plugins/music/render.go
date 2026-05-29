@@ -35,10 +35,18 @@ const (
 	iconSize    = 16
 	iconGutter  = 8
 
-	columns          = 2
-	columnGap        = 16
-	columnWidth      = (fragmentWidth - columnGap*(columns-1)) / columns
-	textBaselineGap  = 12
+	columns         = 2
+	columnGap       = 16
+	columnWidth     = (fragmentWidth - columnGap*(columns-1)) / columns
+	textBaselineGap = 12
+)
+
+// artworkCornerFrac softens the album-art corners (a fraction of the 32px
+// box, so ~4px) so the thumbnails aren't razor-sharp squares. artClipID is
+// the shared clipPath id referenced by every artwork <image>.
+const (
+	artworkCornerFrac = 0.125
+	artClipID         = "music-art-round"
 )
 
 // Render lays out the music card: an h2 + h3 header pair followed by one
@@ -74,6 +82,9 @@ func (*Plugin) Render(env *plugin.Env, raw any) (plugin.Fragment, error) {
 	}
 
 	var buf bytes.Buffer
+
+	// Rounded-corner clip shared by every album-art image in this card.
+	render.EmitRoundedClip(&buf, artClipID, artworkCornerFrac)
 
 	// h2: "<music-note> Recently played" in the heading color.
 	render.EmitOcticon(&buf, 0, 0, iconSize, "music-note", "#0366d6")
@@ -160,8 +171,8 @@ func writeRow(buf *bytes.Buffer, t Track, x, y, nameBaseY, artistBaseY int, name
 
 	if t.ArtworkB64 != "" {
 		fmt.Fprintf(buf,
-			`<image x="0" y="0" width="%d" height="%d" href="%s"><title>%s</title></image>`,
-			artworkSize, artworkSize, xmlEscapeAttr(t.ArtworkB64), xmlEscape(t.Name),
+			`<image x="0" y="0" width="%d" height="%d" href="%s" clip-path="url(#%s)"><title>%s</title></image>`,
+			artworkSize, artworkSize, xmlEscapeAttr(t.ArtworkB64), artClipID, xmlEscape(t.Name),
 		)
 	} else {
 		fmt.Fprintf(buf,
