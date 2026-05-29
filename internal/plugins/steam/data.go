@@ -14,15 +14,26 @@ type Player struct {
 // Game describes a single row in either the most-played or recently-played
 // section. PlaytimeHours is total playtime for the most-played list and
 // last-two-weeks playtime for the recently-played list; both arrive in
-// minutes from the Steam API and are converted on ingest. LastPlayed is
-// reserved for a future per-game last-played string; v1 leaves it empty
-// because Steam's REST endpoints we use don't return that value directly.
+// minutes from the Steam API and are converted on ingest.
 type Game struct {
 	AppID         int
 	Name          string
 	IconB64       string
 	PlaytimeHours float64
-	LastPlayed    string
+	// LastPlayed is a preformatted absolute date ("Jan 2, 2006"), or empty
+	// when Steam reports no last-played timestamp for the game.
+	LastPlayed string
+	// PercentOfTotal is the game's share of the player's lifetime playtime,
+	// in the range 0..1. Zero when total playtime is unknown.
+	PercentOfTotal float64
+	// Platform names the dominant platform ("Windows", "macOS", "Linux",
+	// "Steam Deck"), or "" when Steam reports no per-platform breakdown.
+	Platform string
+	// Achievement counts are populated only when HasAchievements is true —
+	// i.e. the profile is public and the game exposes achievement stats.
+	HasAchievements bool
+	AchUnlocked     int
+	AchTotal        int
 }
 
 // Data is the value Fetch returns and Render consumes. Sections is carried

@@ -37,7 +37,13 @@ type ownedGame struct {
 	AppID           int    `json:"appid"`
 	Name            string `json:"name"`
 	PlaytimeForever int    `json:"playtime_forever"`
+	Playtime2Weeks  int    `json:"playtime_2weeks"`
 	ImgIconURL      string `json:"img_icon_url"`
+	RtimeLastPlayed int64  `json:"rtime_last_played"`
+	PlaytimeWindows int    `json:"playtime_windows_forever"`
+	PlaytimeMac     int    `json:"playtime_mac_forever"`
+	PlaytimeLinux   int    `json:"playtime_linux_forever"`
+	PlaytimeDeck    int    `json:"playtime_deck_forever"`
 }
 
 // ownedGamesResp models the subset of GetOwnedGames we use.
@@ -48,13 +54,20 @@ type ownedGamesResp struct {
 	} `json:"response"`
 }
 
-// recentGame is one entry in the GetRecentlyPlayedGames response. The
-// Playtime2Weeks field is in minutes.
+// recentGame is one entry in the GetRecentlyPlayedGames response. Playtime
+// fields are in minutes. This endpoint carries the per-platform breakdown
+// but not rtime_last_played, so fetch.go joins against the owned-games list
+// (by appid) to recover a last-played date for recent games.
 type recentGame struct {
-	AppID          int    `json:"appid"`
-	Name           string `json:"name"`
-	Playtime2Weeks int    `json:"playtime_2weeks"`
-	ImgIconURL     string `json:"img_icon_url"`
+	AppID           int    `json:"appid"`
+	Name            string `json:"name"`
+	Playtime2Weeks  int    `json:"playtime_2weeks"`
+	PlaytimeForever int    `json:"playtime_forever"`
+	ImgIconURL      string `json:"img_icon_url"`
+	PlaytimeWindows int    `json:"playtime_windows_forever"`
+	PlaytimeMac     int    `json:"playtime_mac_forever"`
+	PlaytimeLinux   int    `json:"playtime_linux_forever"`
+	PlaytimeDeck    int    `json:"playtime_deck_forever"`
 }
 
 // recentGamesResp models the subset of GetRecentlyPlayedGames we use.
@@ -145,6 +158,40 @@ func getRecent(ctx context.Context, hc *http.Client, cfg Config) (recentGamesRes
 		return out, err
 	}
 	return out, nil
+}
+
+// playerAchievementsResp models GetPlayerAchievements. Success is false when
+// the game has no achievement schema or the profile hides game details; in
+// that case Achievements is empty and the caller skips the stat.
+type playerAchievementsResp struct {
+	PlayerStats struct {
+		Success      bool `json:"success"`
+		Achievements []struct {
+			Achieved int `json:"achieved"`
+		} `json:"achievements"`
+	} `json:"playerstats"`
+}
+
+// getAchievements returns the (unlocked, total) achievement counts for one
+// game. It is best-effort: Steam answers 4xx for games without achievements
+// or private profiles, which surfaces here as a non-nil error the caller is
+// expected to swallow (leaving the game's achievement stat unset).
+func getAchievements(ctx context.Context, hc *http.Client, cfg Config, appid int) (unlocked, total int, err error) {
+	u := fmt.Sprintf("%s/ISteamUserStats/GetPlayerAchievements/v0001/?key=%s&steamid=%s&appid=%d&l=en",
+		apiBase(cfg), url.QueryEscape(cfg.Token), url.QueryEscape(cfg.User), appid)
+	var out playerAchievementsResp
+	if err := doJSON(ctx, hc, u, &out); err != nil {
+		return 0, 0, err
+	}
+	if !out.PlayerStats.Success {
+		return 0, 0, nil
+	}
+	for _, a := range out.PlayerStats.Achievements {
+		if a.Achieved == 1 {
+			unlocked++
+		}
+	}
+	return unlocked, len(out.PlayerStats.Achievements), nil
 }
 
 // iconURL returns the canonical Steam game-icon URL. img_icon_url from the

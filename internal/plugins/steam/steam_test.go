@@ -31,7 +31,9 @@ const (
 		"response": {
 			"game_count": 2,
 			"games": [
-				{"appid": 730,  "name": "Counter-Strike", "playtime_forever": 12000, "img_icon_url": "abc"},
+				{"appid": 730,  "name": "Counter-Strike", "playtime_forever": 12000, "img_icon_url": "abc",
+				 "rtime_last_played": 1700000000,
+				 "playtime_windows_forever": 2000, "playtime_linux_forever": 10000, "playtime_deck_forever": 9000},
 				{"appid": 440,  "name": "Team Fortress 2", "playtime_forever":   600, "img_icon_url": "def"}
 			]
 		}
@@ -40,6 +42,17 @@ const (
 		"response": {
 			"games": [
 				{"appid": 730, "name": "Counter-Strike", "playtime_2weeks": 180, "img_icon_url": "abc"}
+			]
+		}
+	}`
+	// 3 of 5 achievements unlocked; returned for whatever appid the stub is
+	// asked about, which suffices for the single-game assertions below.
+	playerAchievementsJSON = `{
+		"playerstats": {
+			"success": true,
+			"achievements": [
+				{"achieved": 1}, {"achieved": 1}, {"achieved": 1},
+				{"achieved": 0}, {"achieved": 0}
 			]
 		}
 	}`
@@ -66,6 +79,10 @@ func newStubServer(t *testing.T) *httptest.Server {
 	mux.HandleFunc("/IPlayerService/GetRecentlyPlayedGames/v1/", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(recentGamesJSON))
+	})
+	mux.HandleFunc("/ISteamUserStats/GetPlayerAchievements/v0001/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(playerAchievementsJSON))
 	})
 	return httptest.NewServer(mux)
 }
@@ -106,9 +123,18 @@ func TestFetch_AllEndpoints_Mocked(t *testing.T) {
 	require.Empty(t, data.Player.AvatarB64, "env.HTTP is nil so avatar must be skipped")
 
 	require.NotEmpty(t, data.MostPlayed, "most-played should include at least one game")
-	require.Equal(t, "Counter-Strike", data.MostPlayed[0].Name, "highest playtime wins")
-	require.InDelta(t, 200.0, data.MostPlayed[0].PlaytimeHours, 0.001)
-	require.Empty(t, data.MostPlayed[0].IconB64, "env.HTTP is nil so icons must be skipped")
+	top := data.MostPlayed[0]
+	require.Equal(t, "Counter-Strike", top.Name, "highest playtime wins")
+	require.InDelta(t, 200.0, top.PlaytimeHours, 0.001)
+	require.Empty(t, top.IconB64, "env.HTTP is nil so icons must be skipped")
+	// 12000 / 12600 total minutes.
+	require.InDelta(t, 0.952, top.PercentOfTotal, 0.01)
+	// deck (9000) dominates desktop-linux (10000-9000) and windows (2000).
+	require.Equal(t, "Steam Deck", top.Platform)
+	require.Equal(t, "Nov 14, 2023", top.LastPlayed)
+	require.True(t, top.HasAchievements)
+	require.Equal(t, 3, top.AchUnlocked)
+	require.Equal(t, 5, top.AchTotal)
 
 	require.NotEmpty(t, data.Recently)
 	require.Equal(t, "Counter-Strike", data.Recently[0].Name)
