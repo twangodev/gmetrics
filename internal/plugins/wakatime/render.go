@@ -470,10 +470,13 @@ func drawBarW(ctx *canvas.Context, x, y, barW, frac float64, fill color.RGBA) {
 	if frac > 1 {
 		frac = 1
 	}
+	// Pill-rounded ends (radius = half the bar height). RoundedRectangle
+	// clamps the radius to half of each side, so bars narrower than they are
+	// tall stay well-formed.
 	ctx.Push()
 	ctx.SetFillColor(fill)
 	ctx.SetStrokeColor(color.RGBA{})
-	ctx.DrawPath(x, y, canvas.Rectangle(barW*frac, barHeight))
+	ctx.DrawPath(x, y, canvas.RoundedRectangle(barW*frac, barHeight, barHeight/2))
 	ctx.Pop()
 }
 
