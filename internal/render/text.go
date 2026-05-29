@@ -91,6 +91,30 @@ func EmitTextPathRightAlignedClass(w io.Writer, rightX, baselineY int, s string,
 	EmitTextPathClass(w, x, baselineY, s, face, class)
 }
 
+// TruncateToWidth returns s clipped (rune-aware) so its rendered width
+// under face fits within maxW pixels, appending an ellipsis when clipped.
+// Binary-searches the largest prefix that still fits with the ellipsis.
+func TruncateToWidth(s string, face *canvas.FontFace, maxW float64) string {
+	if s == "" || face.TextWidth(s) <= maxW {
+		return s
+	}
+	const ellipsis = "…"
+	if face.TextWidth(ellipsis) > maxW {
+		return ""
+	}
+	runes := []rune(s)
+	lo, hi := 0, len(runes)
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		if face.TextWidth(string(runes[:mid])+ellipsis) <= maxW {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	return string(runes[:lo]) + ellipsis
+}
+
 // PathDataFor converts a string to SVG path data using the supplied face.
 // Returns the empty string when the font produces no glyph paths (e.g.
 // the input is whitespace only); callers fall through gracefully.
