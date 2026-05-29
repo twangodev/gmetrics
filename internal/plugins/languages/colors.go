@@ -61,6 +61,14 @@ var defaultColors = map[string]string{
 	"Jupyter Notebook": "#DA5B0B",
 }
 
+// ColorFor is the exported, zero-override variant of colorFor for callers
+// outside this package (e.g. the wakatime plugin's "languages-graphs" cell)
+// that want the same Linguist resolution without supplying GraphQL color
+// overrides. Returns a "#rrggbb" hex string.
+func ColorFor(name string) string {
+	return colorFor(name, nil)
+}
+
 // colorFor resolves a language name to a hex color, in priority order:
 //  1. the per-fetch overrides map (populated from the GraphQL response, so
 //     GitHub's colors win for non-indepth fetches);
