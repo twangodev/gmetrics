@@ -15,14 +15,9 @@ import (
 	"github.com/twangodev/gmetrics/internal/render"
 )
 
-// Fragment dimensions and layout constants (in canvas units, i.e. pixels @ 1 DPMM).
 const (
 	fragmentWidth = 440
 
-	// Header / prose block sizing. The h2 sits on a 24px tall band; each
-	// prose line below it is 20px tall. The block height is computed in
-	// computeProseHeight so the canvas-drawn bar charts start at exactly
-	// the right Y.
 	h2BaselineY = 16
 	h2BlockH    = 24
 	proseLineH  = 20
@@ -37,61 +32,41 @@ const (
 	bodyFontPt   = 12.0
 	headerFontPt = 14.0
 
-	// Two-column layout for the graph sections. Each cell is graphColW wide
-	// and sits in a 2-column grid with graphColGap horizontal padding between
-	// the two cells. (graphColW * 2 + graphColGap == fragmentWidth.)
-	graphColW   = 210.0
+	graphColW   = 210.0 // graphColW*2 + graphColGap == fragmentWidth
 	graphColGap = 20.0
-	// Within a cell, the layout is: name | bar | time. The name and time
-	// columns both shrink-wrap to their widest label per cell (each capped in
-	// drawGraphCell); the bar fills whatever's left in between.
+
 	graphNameBarGap = 6.0
 	graphBarPctGap  = 6.0
+
+	defaultRowLimit = 5
+	minBarW         = 20.0
 )
 
-// barPalette is a small fixed color cycle used for the graph bars. Distinct
-// hues are kept simple so the rendered cards stay legible on both light and
-// dark themes when previewed; the outer card CSS does not override these.
+// Fixed cycle kept legible on light and dark themes; the card CSS does not override these canvas colors.
 var barPalette = []color.RGBA{
-	{R: 0x57, G: 0xa6, B: 0xff, A: 0xff}, // blue
-	{R: 0x5d, G: 0xe0, B: 0xa0, A: 0xff}, // green
-	{R: 0xff, G: 0xb1, B: 0x47, A: 0xff}, // amber
-	{R: 0xff, G: 0x7b, B: 0x72, A: 0xff}, // red
-	{R: 0xbc, G: 0x8c, B: 0xff, A: 0xff}, // purple
-	{R: 0x4d, G: 0xd0, B: 0xe1, A: 0xff}, // cyan
+	{R: 0x57, G: 0xa6, B: 0xff, A: 0xff},
+	{R: 0x5d, G: 0xe0, B: 0xa0, A: 0xff},
+	{R: 0xff, G: 0xb1, B: 0x47, A: 0xff},
+	{R: 0xff, G: 0x7b, B: 0x72, A: 0xff},
+	{R: 0xbc, G: 0x8c, B: 0xff, A: 0xff},
+	{R: 0x4d, G: 0xd0, B: 0xe1, A: 0xff},
 }
 
-// chartTextColor matches the card's body text (#777777 — the EmitTextPath
-// and CSS `text` default used by the prose summary and every other plugin).
-// The bar charts are canvas-rendered, so they can't inherit the CSS class
-// and must set this explicitly; without it the rows render in a near-black
-// that nothing else on the card uses. Header rows reuse the same gray and
-// rely on their bold, larger face for hierarchy (as the music card does).
+// chartTextColor matches the CSS `text` default (#777777); canvas-rendered bars
+// can't inherit the class, so the color is set explicitly.
 var chartTextColor = color.RGBA{R: 0x77, G: 0x77, B: 0x77, A: 0xff}
 
-// renderFragment composes the wakatime SVG fragment. The output stacks an
-// upstream-style prose header (h2 title + per-category one-line summaries)
-// on top of the existing canvas-drawn bar-chart sections. Caller-facing
-// entry point used by Plugin.Render.
 func renderFragment(_ *plugin.Env, d Data) (plugin.Fragment, error) {
-	// 1. Build the prose header in raw SVG (text-as-path via the render
-	//    helpers, matching the music / people plugins). The output is
-	//    measured up front so the canvas section knows its Y offset.
 	proseBody, proseHeight, err := buildProseHeader(d)
 	if err != nil {
 		return plugin.Fragment{}, err
 	}
 
-	// 2. Render the bar charts via the canvas pipeline. Only the
-	//    "*-graphs" sections produce visible output here; the plain-text
-	//    sections are already covered by the prose header.
 	graphBody, graphHeight, err := buildGraphsSection(d)
 	if err != nil {
 		return plugin.Fragment{}, err
 	}
 
-	// 3. Compose: prose first, then a translated <g> wrapping the canvas
-	//    output so its top-left origin lands at the right Y.
 	var buf bytes.Buffer
 	buf.WriteString(proseBody)
 	if graphBody != "" {
@@ -106,16 +81,11 @@ func renderFragment(_ *plugin.Env, d Data) (plugin.Fragment, error) {
 	return plugin.Fragment{Body: buf.String(), Width: fragmentWidth, Height: height}, nil
 }
 
-// proseLine is one icon+text line in the prose summary. text is left empty
-// when the source data is missing so the caller can skip that row.
 type proseLine struct {
 	icon string
 	text string
 }
 
-// buildProseHeader emits the upstream-style h2 + per-category summary
-// lines for the wakatime card. Returns the raw SVG body, the consumed
-// vertical pixels, and any font-loading error.
 func buildProseHeader(d Data) (string, int, error) {
 	h2Face, err := render.Face(16, canvas.FontRegular)
 	if err != nil {
@@ -128,15 +98,10 @@ func buildProseHeader(d Data) (string, int, error) {
 
 	var buf bytes.Buffer
 
-	// h2: "WakaTime (over last <window>)" rendered in the heading colour.
-	// Upstream uses a stopwatch-shaped octicon here; we approximate with
-	// the `clock` octicon, which is already in our map.
+	// `clock` octicon approximates upstream's stopwatch shape.
 	render.EmitOcticon(&buf, 0, 0, iconSize, "clock", "#0366d6")
 	render.EmitTextPathClass(&buf, iconSize+iconGutter, h2BaselineY, h2Label(d.Days), h2Face, "text-heading")
 
-	// Per-category prose lines, split into 2 columns to mirror the upstream
-	// classic template (and the bar-chart grid below it). Left column gets
-	// total-time / project / language; right gets daily-time / editor / os.
 	sections := stringSet(d.Sections)
 	textW := float64(graphColW) - float64(iconSize+iconGutter)
 
@@ -199,15 +164,6 @@ func buildProseHeader(d Data) (string, int, error) {
 	return buf.String(), height, nil
 }
 
-// buildGraphsSection renders only the *-graphs entries from d.Sections
-// using the canvas pipeline. Returns an empty body (and zero height) when
-// no graph sections are requested.
-//
-// Layout (matches upstream lowlighter/metrics' .largeable flex pairing):
-// graph sections are grouped into pairs and rendered side-by-side in a
-// 2-column grid. The pair ordering follows upstream's template — the
-// first column gets (projects, editors) and the second gets (languages,
-// os) when all four are enabled.
 func buildGraphsSection(d Data) (string, int, error) {
 	pairs := pairedGraphSections(d.Sections)
 	if len(pairs) == 0 {
@@ -223,7 +179,6 @@ func buildGraphsSection(d Data) (string, int, error) {
 
 	y := 0.0
 	for _, pair := range pairs {
-		// Row height = max rows across the (1 or 2) cells in this pair.
 		rowH := pairCellHeight(d, pair)
 		y += sectionGap
 		rowTop := y
@@ -248,9 +203,6 @@ func buildGraphsSection(d Data) (string, int, error) {
 	return body, height, nil
 }
 
-// computeGraphsHeight returns the vertical pixels the bar-chart block will
-// occupy. Each row in the 2-column grid contributes a sectionGap + header
-// + max(rowsLeft, rowsRight) * rowH.
 func computeGraphsHeight(d Data) int {
 	pairs := pairedGraphSections(d.Sections)
 	h := 0
@@ -260,8 +212,6 @@ func computeGraphsHeight(d Data) int {
 	return h
 }
 
-// pairCellHeight returns the pixel height of a single row in the 2-column
-// grid: graphHeader + maxRows*graphRowH across the (1 or 2) cells.
 func pairCellHeight(d Data, pair []string) float64 {
 	maxRows := 0
 	for _, key := range pair {
@@ -273,19 +223,8 @@ func pairCellHeight(d Data, pair []string) float64 {
 	return float64(graphHeader + maxRows*graphRowH)
 }
 
-// pairedGraphSections groups the enabled `-graphs` sections into pairs for
-// the 2-column grid. The upstream classic template arranges sections by
-// the order they appear in d.Sections and pairs them as (col0, col1) within
-// each row. Unpaired (odd) sections live alone in column 0.
-//
-// We additionally reorder so projects+languages and editors+os end up next
-// to each other when all four are present (the upstream "pair order").
-// The reordering is only applied when both halves of a canonical pair are
-// present; otherwise we keep d.Sections' relative order so partial configs
-// stay predictable.
 func pairedGraphSections(sections []string) [][]string {
-	// Collect graph keys in input order.
-	keys := []string{}
+	graphKeysInInputOrder := []string{}
 	seen := map[string]bool{}
 	for _, s := range sections {
 		key, isGraph := splitSection(s)
@@ -293,31 +232,27 @@ func pairedGraphSections(sections []string) [][]string {
 			continue
 		}
 		seen[key] = true
-		keys = append(keys, key)
+		graphKeysInInputOrder = append(graphKeysInInputOrder, key)
 	}
 
-	// Reorder so canonical pairs sit adjacent: (projects, languages) and
-	// (editors, os). Any keys outside those pairs come last in their input
-	// order.
-	canonical := [][2]string{{"projects", "languages"}, {"editors", "os"}}
+	canonicalPairs := [][2]string{{"projects", "languages"}, {"editors", "os"}}
 	ordered := []string{}
-	used := map[string]bool{}
-	for _, pair := range canonical {
+	placedInCanonicalPair := map[string]bool{}
+	for _, pair := range canonicalPairs {
 		a, b := pair[0], pair[1]
 		if seen[a] && seen[b] {
 			ordered = append(ordered, a, b)
-			used[a] = true
-			used[b] = true
+			placedInCanonicalPair[a] = true
+			placedInCanonicalPair[b] = true
 		}
 	}
-	for _, k := range keys {
-		if used[k] {
+	for _, k := range graphKeysInInputOrder {
+		if placedInCanonicalPair[k] {
 			continue
 		}
 		ordered = append(ordered, k)
 	}
 
-	// Chunk into pairs of 2.
 	out := [][]string{}
 	for i := 0; i < len(ordered); i += 2 {
 		if i+1 < len(ordered) {
@@ -329,14 +264,10 @@ func pairedGraphSections(sections []string) [][]string {
 	return out
 }
 
-// categoryRowsKey is the bare-key variant of categoryRows.
 func categoryRowsKey(d Data, key string) int {
 	return categoryRows(d, key+"-graphs")
 }
 
-// splitSection parses a section identifier like "languages-graphs" into its
-// base key ("languages") and a flag indicating whether the bar-chart variant
-// was requested.
 func splitSection(s string) (key string, graph bool) {
 	if strings.HasSuffix(s, "-graphs") {
 		return strings.TrimSuffix(s, "-graphs"), true
@@ -344,7 +275,6 @@ func splitSection(s string) (key string, graph bool) {
 	return s, false
 }
 
-// categoryFor returns the slice of Items for the given key on Data.
 func categoryFor(d Data, key string) []Item {
 	switch key {
 	case "projects":
@@ -360,14 +290,12 @@ func categoryFor(d Data, key string) []Item {
 	}
 }
 
-// categoryRows returns the number of rows we will actually draw for the graph
-// variant of the given section.
 func categoryRows(d Data, section string) int {
 	key, _ := splitSection(section)
 	items := categoryFor(d, key)
 	limit := d.Limit
 	if limit <= 0 {
-		limit = 5
+		limit = defaultRowLimit
 	}
 	if len(items) < limit {
 		return len(items)
@@ -375,11 +303,6 @@ func categoryRows(d Data, section string) int {
 	return limit
 }
 
-// drawGraphCell draws a bar-chart cell rooted at (x0, y0) with the given
-// cell width. The header (14px bold) sits at the top; up to N rows of
-// (name | bar | percent) follow underneath. key is the category identifier
-// ("projects" / "languages" / "editors" / "os") and selects which color
-// palette barColorFor uses.
 func drawGraphCell(ctx *canvas.Context, x0, y0, cellW float64, key string, items []Item) {
 	headerFace, err := render.Face(headerFontPt, canvas.FontBold)
 	if err != nil {
@@ -392,17 +315,9 @@ func drawGraphCell(ctx *canvas.Context, x0, y0, cellW float64, key string, items
 	}
 	rowFace.Fill = canvas.Paint{Color: chartTextColor}
 
-	// Header text top is anchored to the cell top; drawLine treats its y
-	// argument as the top of the text box (not the baseline), so passing y0
-	// makes the header occupy y0..y0+graphHeader and the bar rows below it
-	// start at y0+graphHeader without overlap.
 	drawLine(ctx, x0, y0, headerFace, captionFor(key))
 	y := y0 + float64(graphHeader)
 
-	// Column layout: name | bar | time. The name column shrink-wraps to its
-	// widest label (capped at 60% of the cell) and the time column to its
-	// widest label (capped); the bar fills the remaining width. Names longer
-	// than the cap are pixel-truncated below.
 	const nameColMaxFrac = 0.60
 	const valueColMax = 72.0
 	nameColMax := nameColMaxFrac * cellW
@@ -430,13 +345,10 @@ func drawGraphCell(ctx *canvas.Context, x0, y0, cellW float64, key string, items
 	valueX := valueRight - valueColW
 	barX := nameX + nameColW + graphNameBarGap
 	barW := valueX - graphBarPctGap - barX
-	if barW < 20 {
-		barW = 20
+	if barW < minBarW {
+		barW = minBarW
 	}
 
-	// Bars are scaled relative to the most-used item in this cell (the first,
-	// since items are sorted descending), so the top item fills the bar and
-	// the rest are proportional to it.
 	maxSeconds := 0.0
 	for _, it := range items {
 		if it.Seconds > maxSeconds {
@@ -444,11 +356,7 @@ func drawGraphCell(ctx *canvas.Context, x0, y0, cellW float64, key string, items
 		}
 	}
 
-	// Vertically center text and bar within the row. drawLine treats its y
-	// argument as the top of the text box, so to land the text's vertical
-	// center at graphRowH/2 we subtract half the face's visible height
-	// (ascent + descent). The bar's top is already barH/2 above the same
-	// center.
+	// drawLine's y is the text-box top, so center the row by offsetting half the face's visible height.
 	rm := rowFace.Metrics()
 	textVisualH := rm.Ascent + rm.Descent
 	rowTextOffset := (graphRowH - textVisualH) / 2
@@ -464,15 +372,13 @@ func drawGraphCell(ctx *canvas.Context, x0, y0, cellW float64, key string, items
 		barY := y + (graphRowH-barHeight)/2.0
 		drawBarW(ctx, barX, barY, barW, frac, barColorFor(key, it.Name, i))
 
-		// Right-align the time label to the cell's right edge.
-		label := timeLabels[i]
-		drawLine(ctx, valueRight-rowFace.TextWidth(label), rowY, rowFace, label)
+		timeLabel := timeLabels[i]
+		rightAlignedX := valueRight - rowFace.TextWidth(timeLabel)
+		drawLine(ctx, rightAlignedX, rowY, rowFace, timeLabel)
 		y += graphRowH
 	}
 }
 
-// formatDuration renders a coding-time duration compactly for the bar value
-// column: "27h 1m", "8h", or "45m". Sub-minute values round to "0m".
 func formatDuration(seconds float64) string {
 	totalMin := int(seconds/60 + 0.5)
 	h, m := totalMin/60, totalMin%60
@@ -486,8 +392,7 @@ func formatDuration(seconds float64) string {
 	}
 }
 
-// drawLine writes a single line of text starting at (x, baselineTopY). The
-// face must have its Fill set before calling.
+// y is the text-box top, not the baseline; face must have its Fill set.
 func drawLine(ctx *canvas.Context, x, y float64, face *canvas.FontFace, s string) {
 	if s == "" {
 		return
@@ -498,10 +403,7 @@ func drawLine(ctx *canvas.Context, x, y float64, face *canvas.FontFace, s string
 	ctx.DrawText(x, y, box)
 }
 
-// drawBarW paints only the filled portion of a horizontal bar at (x, y)
-// sized (barW × barHeight) with the given normalized fraction (0..1). The
-// remaining (1 - frac) range is left as the card background — no faint
-// track is drawn.
+// Paints only the filled fraction (0..1); no background track is drawn.
 func drawBarW(ctx *canvas.Context, x, y, barW, frac float64, fill color.RGBA) {
 	if frac <= 0 {
 		return
@@ -509,9 +411,7 @@ func drawBarW(ctx *canvas.Context, x, y, barW, frac float64, fill color.RGBA) {
 	if frac > 1 {
 		frac = 1
 	}
-	// Pill-rounded ends (radius = half the bar height). RoundedRectangle
-	// clamps the radius to half of each side, so bars narrower than they are
-	// tall stay well-formed.
+	// barHeight/2 radius gives pill ends; RoundedRectangle clamps it per side.
 	ctx.Push()
 	ctx.SetFillColor(fill)
 	ctx.SetStrokeColor(color.RGBA{})
@@ -519,7 +419,6 @@ func drawBarW(ctx *canvas.Context, x, y, barW, frac float64, fill color.RGBA) {
 	ctx.Pop()
 }
 
-// captionFor returns the human label for a category key.
 func captionFor(key string) string {
 	switch key {
 	case "projects":
@@ -537,9 +436,6 @@ func captionFor(key string) string {
 	}
 }
 
-// h2Label returns the prose-style section title for the given lookback. The
-// special cases mirror the upstream classic template ("week", "month",
-// "6 months", "year"); anything else falls back to a generic "last N days".
 func h2Label(days int) string {
 	switch days {
 	case 7:
@@ -555,9 +451,6 @@ func h2Label(days int) string {
 	}
 }
 
-// plural returns "s" when v is anything but exactly 1, mirroring the
-// upstream `s(...)` helper for English-language pluralisation of nouns
-// that follow a float quantity.
 func plural(v float64) string {
 	if v == 1.0 {
 		return ""
@@ -565,7 +458,6 @@ func plural(v float64) string {
 	return "s"
 }
 
-// pluralInt is the integer-domain variant of plural.
 func pluralInt(v int) string {
 	if v == 1 {
 		return ""
@@ -573,10 +465,6 @@ func pluralInt(v int) string {
 	return "s"
 }
 
-// stringSet collapses a slice of section keys into a quick lookup map so
-// the prose builder can ask "is X enabled?" without scanning the slice on
-// each check. Both bare keys ("languages") and `-graphs` variants are
-// canonicalised onto the bare key.
 func stringSet(xs []string) map[string]bool {
 	out := make(map[string]bool, len(xs))
 	for _, x := range xs {
@@ -586,7 +474,6 @@ func stringSet(xs []string) map[string]bool {
 	return out
 }
 
-// truncate trims a string to n runes with an ellipsis if it would overflow.
 func truncate(s string, n int) string {
 	if n <= 0 {
 		return ""
@@ -601,17 +488,12 @@ func truncate(s string, n int) string {
 	return string(r[:n-1]) + "…"
 }
 
-// outerSVGTag matches the leading `<svg ...>` and trailing `</svg>` so we can
-// strip them from the canvas SVG and leave only the inner drawing elements.
 var (
 	leadingSVG  = regexp.MustCompile(`^\s*<svg[^>]*>`)
 	trailingSVG = regexp.MustCompile(`</svg>\s*$`)
 )
 
-// exportFragment serializes the canvas to SVG with text rendered as outline
-// paths (no embedded font, no `<text>` elements that would depend on a font
-// being present at view time) and strips the outer <svg> wrapper so the
-// frame composer can position it inside the parent document.
+// Strips the outer <svg> wrapper so the frame composer can nest the result.
 func exportFragment(c *canvas.Canvas) (string, error) {
 	w, h := c.Size()
 	if h <= 0 {
@@ -635,9 +517,7 @@ func exportFragment(c *canvas.Canvas) (string, error) {
 	return body, nil
 }
 
-// pathRenderer wraps an SVG renderer so that text is rendered as outline
-// paths instead of `<text>` elements (mirroring the spec's "Outline: true"
-// requirement for Camo-proof SVG output).
+// Renders text as outline paths instead of <text>, so GitHub's Camo proxy keeps it.
 type pathRenderer struct {
 	inner *svgrenderer.SVG
 }
