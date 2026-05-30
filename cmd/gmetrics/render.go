@@ -17,7 +17,6 @@ import (
 	"github.com/twangodev/gmetrics/internal/plugin"
 	"github.com/twangodev/gmetrics/internal/render"
 
-	// Side-effect plugin registration:
 	_ "github.com/twangodev/gmetrics/internal/plugins/base"
 	_ "github.com/twangodev/gmetrics/internal/plugins/languages"
 	_ "github.com/twangodev/gmetrics/internal/plugins/music"
@@ -50,15 +49,12 @@ func init() {
 func runRender(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	// 1. Logger.
-	lvl := slog.LevelInfo
+	logLevel := slog.LevelInfo
 	if renderVerbose {
-		lvl = slog.LevelDebug
+		logLevel = slog.LevelDebug
 	}
-	logger := gmlog.NewLogger(gmlog.Options{Level: lvl})
+	logger := gmlog.NewLogger(gmlog.Options{Level: logLevel})
 
-	// 2. Config (combined: file + env, env wins). Empty filePath falls back
-	// to env-only mode, matching how the GitHub Action invokes us.
 	cfg, err := config.LoadCombined(renderCfgPath, os.Environ())
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -70,7 +66,6 @@ func runRender(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("validate: %w", err)
 	}
 
-	// 3. HTTP client with retries + light rate limiting.
 	hc := httpx.New(httpx.Config{
 		MaxRetries:    3,
 		RetryWait:     500 * time.Millisecond,
@@ -79,8 +74,6 @@ func runRender(cmd *cobra.Command, args []string) error {
 		UserAgent:     "gmetrics/0.1",
 	})
 
-	// 4. GitHub clients. Surface a friendly error when no token is set
-	// rather than letting githubapi.New return its generic message.
 	if cfg.GitHub.Token == "" {
 		return fmt.Errorf("github token required (set github.token in config or INPUT_TOKEN env)")
 	}
@@ -92,7 +85,6 @@ func runRender(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("github client: %w", err)
 	}
 
-	// 5. Plugin env.
 	env := &plugin.Env{
 		Login:   cfg.User,
 		Token:   cfg.GitHub.Token,
@@ -102,21 +94,18 @@ func runRender(cmd *cobra.Command, args []string) error {
 		Log:     logger,
 	}
 
-	// 6. Engine.
 	engine := &metrics.Engine{Env: env, Strict: renderStrict}
 	frags, err := engine.Render(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("engine render: %w", err)
 	}
 
-	// 7. Outer-frame composition.
 	framer := render.NewFramer(render.Options{Width: 480, Title: cfg.User})
 	svg, err := framer.Compose(frags)
 	if err != nil {
 		return fmt.Errorf("compose: %w", err)
 	}
 
-	// 8. Write SVG.
 	if err := os.WriteFile(cfg.Filename, []byte(svg), 0o644); err != nil {
 		return fmt.Errorf("write svg: %w", err)
 	}
