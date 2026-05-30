@@ -34,16 +34,11 @@ func inputsJSONEntries(environ []string) []string {
 	return out
 }
 
-// readFile is a thin os.ReadFile wrapper exposed as a package-private
-// helper so tests can stub it out if needed.
 func readFile(path string) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
-// ParseBool accepts the upstream-compatible boolean spellings used
-// throughout lowlighter/metrics: yes/no, true/false, on/off, 1/0, plus
-// the empty string (treated as false). It is case-insensitive and
-// trims surrounding whitespace.
+// ParseBool accepts the upstream lowlighter/metrics spellings; empty means false.
 func ParseBool(s string) (bool, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "yes", "true", "on", "1":
@@ -54,8 +49,6 @@ func ParseBool(s string) (bool, error) {
 	return false, fmt.Errorf("invalid bool: %q", s)
 }
 
-// envFieldKind describes how an INPUT_* env var value should be parsed
-// before placement into the nested YAML map.
 type envFieldKind int
 
 const (
@@ -65,17 +58,12 @@ const (
 	envCSV
 )
 
-// envMapping describes one INPUT_* → config-path translation.
 type envMapping struct {
-	// path is the dot-separated config key (e.g. "plugins.languages.sections").
-	path string
-	kind envFieldKind
+	dottedConfigPath string
+	kind             envFieldKind
 }
 
-// envMappings is the static lookup from INPUT_* env var name (without
-// the INPUT_ prefix, uppercase) to its target config path + value kind.
-// Unrecognised INPUT_* env vars are ignored — GH Actions injects many
-// unrelated ones at runtime.
+// Keyed by INPUT_* name minus prefix, uppercased; unknown names are ignored since Actions injects unrelated env vars.
 var envMappings = map[string]envMapping{
 	"USER":                            {"user", envString},
 	"FILENAME":                        {"filename", envString},
@@ -122,8 +110,6 @@ var envMappings = map[string]envMapping{
 	"PLUGIN_STEAM_ACHIEVEMENTS_LIMIT": {"plugins.steam.achievements_limit", envInt},
 }
 
-// parseEnvValue converts the raw env-var string into the typed Go value
-// matching the mapping's kind, suitable for placement into a YAML map.
 func parseEnvValue(raw string, kind envFieldKind) (any, error) {
 	switch kind {
 	case envString:
@@ -151,8 +137,6 @@ func parseEnvValue(raw string, kind envFieldKind) (any, error) {
 	return nil, fmt.Errorf("unknown env field kind %d", kind)
 }
 
-// setNested walks (or creates) a nested map[string]any along the
-// dot-separated path and assigns the leaf value at the final key.
 func setNested(root map[string]any, path string, value any) {
 	parts := strings.Split(path, ".")
 	cursor := root
@@ -170,11 +154,6 @@ func setNested(root map[string]any, path string, value any) {
 	}
 }
 
-// envToYAML walks environ for INPUT_* entries, maps them via
-// envMappings, and serialises the resulting nested map to a YAML
-// document. Entries that don't match a known mapping are silently
-// skipped — GH Actions injects unrelated env vars that should not
-// cause a config-load failure.
 func envToYAML(environ []string) ([]byte, error) {
 	root := map[string]any{}
 	environ = append(inputsJSONEntries(environ), environ...)
@@ -197,7 +176,7 @@ func envToYAML(environ []string) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("env %s: %w", key, err)
 		}
-		setNested(root, m.path, parsed)
+		setNested(root, m.dottedConfigPath, parsed)
 	}
 	if len(root) == 0 {
 		return nil, nil
