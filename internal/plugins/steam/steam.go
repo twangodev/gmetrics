@@ -1,9 +1,4 @@
-// Package steam implements the gmetrics "steam" plugin. It renders the
-// target Steam user's player summary, most-played games, and recently-played
-// games. The v1 scope is the subset of upstream's much larger Steam plugin
-// the user's workflow actually exercises: sections = [player, most-played,
-// recently-played], recent_games_limit = 1, achievements_limit = 0 (i.e.
-// achievements rendering is skipped entirely).
+// Package steam renders a Steam user's player summary and games.
 package steam
 
 import (
@@ -16,14 +11,10 @@ func init() {
 	plugin.Register("steam", func() plugin.Plugin { return &Plugin{} })
 }
 
-// Plugin is the gmetrics steam plugin implementation.
 type Plugin struct{}
 
-// Name returns the plugin's stable identifier.
 func (*Plugin) Name() string { return "steam" }
 
-// DecodeConfig parses the raw map produced by the YAML/env config loader into
-// a typed Config. Missing keys fall back to defaultConfig().
 func (*Plugin) DecodeConfig(raw map[string]any) (any, error) {
 	cfg := defaultConfig()
 	if raw == nil {
@@ -77,11 +68,6 @@ func (*Plugin) DecodeConfig(raw map[string]any) (any, error) {
 	return cfg, nil
 }
 
-// Fetch is implemented in fetch.go.
-// Render is implemented in render.go.
-
-// toString accepts a string-typed value and returns it. Any other input
-// returns a descriptive error.
 func toString(v any) (string, error) {
 	s, ok := v.(string)
 	if !ok {
@@ -90,8 +76,6 @@ func toString(v any) (string, error) {
 	return s, nil
 }
 
-// toStringSlice accepts the common shapes a YAML/env decoder may produce
-// for a list-of-strings field.
 func toStringSlice(v any) ([]string, error) {
 	switch s := v.(type) {
 	case []string:
@@ -113,8 +97,7 @@ func toStringSlice(v any) ([]string, error) {
 	}
 }
 
-// toInt accepts int, int64, or float64 (YAML often decodes integers as
-// float64 via interface{}) and returns the corresponding int.
+// float64 case: YAML decodes integers as float64 through interface{}.
 func toInt(v any) (int, error) {
 	switch n := v.(type) {
 	case int:
