@@ -6,19 +6,9 @@ import (
 	enry "github.com/go-enry/go-enry/v2"
 )
 
-// defaultColors is a small embedded fallback map of GitHub Linguist colors
-// for the most common languages. It exists so the languages bar renders with
-// plausible colors when:
-//
-//   - The non-indepth path is used but the GraphQL response omitted a color
-//     (rare; some legacy languages have empty colors in Linguist's YAML).
-//   - The indepth path is used: go-enry's GetColor() is the primary source,
-//     but if a language isn't found there either we fall back to this map.
-//
-// Values are taken verbatim from GitHub Linguist's languages.yml. The list
-// is intentionally short — it covers the languages a single user is likely
-// to use enough of for the colored bar to matter; everything else falls back
-// to enry.GetColor (which has the full list) or, ultimately, a neutral grey.
+const neutralColor = "#cccccc"
+
+// Values are taken verbatim from GitHub Linguist's languages.yml.
 var defaultColors = map[string]string{
 	"Go":               "#00ADD8",
 	"Python":           "#3572A5",
@@ -61,23 +51,10 @@ var defaultColors = map[string]string{
 	"Jupyter Notebook": "#DA5B0B",
 }
 
-// ColorFor is the exported, zero-override variant of colorFor for callers
-// outside this package (e.g. the wakatime plugin's "languages-graphs" cell)
-// that want the same Linguist resolution without supplying GraphQL color
-// overrides. Returns a "#rrggbb" hex string.
 func ColorFor(name string) string {
 	return colorFor(name, nil)
 }
 
-// colorFor resolves a language name to a hex color, in priority order:
-//  1. the per-fetch overrides map (populated from the GraphQL response, so
-//     GitHub's colors win for non-indepth fetches);
-//  2. defaultColors above;
-//  3. enry.GetColor (the full Linguist list);
-//  4. a neutral grey fallback ("#cccccc").
-//
-// The overrides argument may be nil (e.g. in indepth mode where colors
-// aren't provided alongside the bytes count).
 func colorFor(name string, overrides map[string]string) string {
 	if overrides != nil {
 		if c, ok := overrides[name]; ok && c != "" {
@@ -90,19 +67,16 @@ func colorFor(name string, overrides map[string]string) string {
 	if c := enry.GetColor(name); c != "" {
 		return c
 	}
-	return "#cccccc"
+	return neutralColor
 }
 
-// isIgnored reports whether name appears in ignored, comparing case-
-// insensitively. ignored is the post-decode []string from Config.Ignored;
-// upstream accepts the same shape.
 func isIgnored(name string, ignored []string) bool {
 	if len(ignored) == 0 {
 		return false
 	}
-	lower := strings.ToLower(name)
+	lowerName := strings.ToLower(name)
 	for _, ig := range ignored {
-		if strings.ToLower(ig) == lower {
+		if strings.ToLower(ig) == lowerName {
 			return true
 		}
 	}
