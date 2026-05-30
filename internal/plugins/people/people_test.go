@@ -15,10 +15,6 @@ import (
 	"github.com/twangodev/gmetrics/internal/plugins/people"
 )
 
-// TestRender_TwoSections verifies the render path produces a well-formed
-// Fragment with the expected dimensions for two sections (one with 3
-// people, one with 2). Avatars are deliberately left empty (placeholder
-// circles) so this test does not touch the network.
 func TestRender_TwoSections(t *testing.T) {
 	p := &people.Plugin{}
 	data := people.Data{
@@ -47,34 +43,27 @@ func TestRender_TwoSections(t *testing.T) {
 	frag, err := p.Render(nil, data)
 	require.NoError(t, err)
 	require.Equal(t, 440, frag.Width)
-	require.GreaterOrEqual(t, frag.Height, 84,
-		"two sections with header + one row each should be at least 2 * (28 + 28 + 4 + 8) ~= 136 px")
+	require.GreaterOrEqual(t, frag.Height, 84)
 
-	// Sanity: the body must contain both section markers and a placeholder
-	// circle for every person (5 people total). Section headers are
-	// rendered as glyph <path> elements (text-as-path) so we can't grep
-	// for the literal "Followers (3)" substring; instead we assert one
-	// header <path> per section.
 	require.Contains(t, frag.Body, `data-type="followers"`)
 	require.Contains(t, frag.Body, `data-type="following"`)
-	require.Equal(t, 5, strings.Count(frag.Body, "<circle"))
-	require.GreaterOrEqual(t, strings.Count(frag.Body, "<path"), 2,
-		"each section should contribute one header <path> element")
+
+	const totalPeople = 5
+	require.Equal(t, totalPeople, strings.Count(frag.Body, "<circle"))
+
+	// Section headers are rendered as text-as-path glyphs, so assert one header <path> per section rather than grepping header text.
+	const sectionCount = 2
+	require.GreaterOrEqual(t, strings.Count(frag.Body, "<path"), sectionCount)
 }
 
-// TestFetch_FollowersAndFollowing_Counts spins up a mock GraphQL endpoint
-// that distinguishes followers vs following by inspecting the query body
-// and returns a canned set of nodes. env.HTTP is intentionally nil so the
-// plugin skips the avatar fetch step; we only assert that the structure
-// and counts come through correctly.
 func TestFetch_FollowersAndFollowing_Counts(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		s := string(body)
+		query := string(body)
 
 		w.Header().Set("Content-Type", "application/json")
 		switch {
-		case strings.Contains(s, "followers("):
+		case strings.Contains(query, "followers("):
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"data": map[string]any{
 					"user": map[string]any{
@@ -88,7 +77,7 @@ func TestFetch_FollowersAndFollowing_Counts(t *testing.T) {
 					},
 				},
 			})
-		case strings.Contains(s, "following("):
+		case strings.Contains(query, "following("):
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"data": map[string]any{
 					"user": map[string]any{
@@ -102,7 +91,7 @@ func TestFetch_FollowersAndFollowing_Counts(t *testing.T) {
 				},
 			})
 		default:
-			t.Fatalf("unexpected query body: %s", s)
+			t.Fatalf("unexpected query body: %s", query)
 		}
 	}))
 	defer srv.Close()
@@ -111,7 +100,7 @@ func TestFetch_FollowersAndFollowing_Counts(t *testing.T) {
 	env := &plugin.Env{
 		Login:   "twangodev",
 		GraphQL: gql,
-		HTTP:    nil, // skip avatar fetch
+		HTTP:    nil,
 	}
 
 	p := &people.Plugin{}
@@ -130,15 +119,14 @@ func TestFetch_FollowersAndFollowing_Counts(t *testing.T) {
 	require.Len(t, data.Sections, 2)
 	require.Equal(t, "followers", data.Sections[0].Type)
 	require.Equal(t, 1234, data.Sections[0].Total,
-		"Section.Total should be populated from user.followers.totalCount, "+
-			"not derived from the number of returned nodes")
+		"Total comes from totalCount, not the returned node count")
 	require.Len(t, data.Sections[0].People, 2)
 	require.Equal(t, "alice", data.Sections[0].People[0].Login)
 	require.Empty(t, data.Sections[0].People[0].AvatarB64,
 		"avatars should be unfetched when env.HTTP is nil")
 	require.Equal(t, "following", data.Sections[1].Type)
 	require.Equal(t, 42, data.Sections[1].Total,
-		"Section.Total should be populated from user.following.totalCount")
+		"Total comes from totalCount, not the returned node count")
 	require.Len(t, data.Sections[1].People, 1)
 	require.Equal(t, "carol", data.Sections[1].People[0].Login)
 }
