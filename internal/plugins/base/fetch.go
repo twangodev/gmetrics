@@ -30,7 +30,8 @@ type baseQuery struct {
 		AvatarURL  githubv4.String `graphql:"avatarUrl"`
 		Bio        githubv4.String
 		CreatedAt  githubv4.DateTime
-		DatabaseID githubv4.Int `graphql:"databaseId"`
+		DatabaseID githubv4.Int     `graphql:"databaseId"`
+		IsHireable githubv4.Boolean `graphql:"isHireable"`
 
 		Followers struct {
 			TotalCount githubv4.Int
@@ -89,7 +90,6 @@ type baseQuery struct {
 func Fetch(ctx context.Context, env *plugin.Env, cfg Config) (Data, error) {
 	var d Data
 	d.Sections = append(d.Sections, cfg.Sections...)
-	d.Hireable = cfg.Hireable
 	d.Metadata.GeneratedAt = time.Now().UTC().Format(time.RFC3339)
 
 	// With no sections to render, base has nothing to draw — skip the GitHub
@@ -139,6 +139,8 @@ func Fetch(ctx context.Context, env *plugin.Env, cfg Config) (Data, error) {
 	if d.User.Login == "" {
 		d.User.Login = login
 	}
+
+	d.Hireable = cfg.Hireable && bool(q.User.IsHireable)
 
 	d.Activity = Activity{
 		Commits:      int(q.User.ContributionsCollection.TotalCommitContributions),

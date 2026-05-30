@@ -8,8 +8,11 @@ type Config struct {
 	// must be one of "header", "activity", "community", "repositories",
 	// "metadata".
 	Sections []string `koanf:"sections"`
-	// Hireable, when true, surfaces an "Available for hire" badge in the
-	// header section. Mirrors upstream's base_hireable input.
+	// Hireable, when true, tracks the account's live GitHub "Available for
+	// hire" status: the header badge shows only when GitHub reports the user
+	// as hireable. When false, the badge never shows. Mirrors upstream's
+	// base_hireable input (extended here to follow GitHub rather than force
+	// the badge on).
 	Hireable bool `koanf:"hireable"`
 	// Indepth, when true, signals that activity stats should be fetched
 	// across the user's entire history rather than the default rolling

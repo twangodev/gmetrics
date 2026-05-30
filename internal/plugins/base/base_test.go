@@ -50,7 +50,7 @@ func TestRender_AllSections_NonEmpty(t *testing.T) {
 }
 
 // TestFetch_EmptySections_SkipsGraphQL verifies base short-circuits before
-// any GraphQL work when no sections are configured (base: ''). It passes a
+// any GraphQL work when no sections are configured (base: ”). It passes a
 // nil GraphQL client — which Fetch would otherwise reject — to prove the
 // query is never attempted, so a plugins-only card runs with no GitHub token.
 func TestFetch_EmptySections_SkipsGraphQL(t *testing.T) {
@@ -166,6 +166,63 @@ func TestFetch_PopulatesUser(t *testing.T) {
 
 	require.Equal(t, []string{"header", "activity", "community", "repositories", "metadata"}, data.Sections)
 	require.NotEmpty(t, data.Metadata.GeneratedAt)
+}
+
+// TestFetch_Hireable_TracksGitHub verifies the base_hireable input is a
+// tracking switch, not a force-on switch: when enabled, the badge reflects
+// the account's live GitHub "Available for hire" status; when disabled, the
+// badge never shows regardless of GitHub.
+func TestFetch_Hireable_TracksGitHub(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		track     bool // cfg.Hireable
+		github    bool // GitHub's isHireable
+		wantBadge bool
+	}{
+		{"track-and-github-hireable", true, true, true},
+		{"track-but-github-not-hireable", true, false, false},
+		{"not-tracking-even-if-github-hireable", false, true, false},
+		{"not-tracking-and-not-hireable", false, false, false},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			respBody := fmt.Sprintf(`{
+  "data": {
+    "user": {
+      "login": "alice",
+      "isHireable": %t,
+      "repositories": {"totalCount": 0, "totalDiskUsage": 0},
+      "contributionsCollection": {"contributionCalendar": {"weeks": []}}
+    }
+  }
+}`, tc.github)
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(respBody))
+			}))
+			t.Cleanup(srv.Close)
+
+			clients, err := githubapi.New(context.Background(), githubapi.Config{
+				Token:          "ghp_dummy",
+				GraphQLBaseURL: srv.URL + "/graphql",
+			})
+			require.NoError(t, err)
+
+			env := &plugin.Env{Login: "alice", REST: clients.REST, GraphQL: clients.GraphQL}
+			cfg := defaultConfig()
+			cfg.Repos.Max = 0 // skip the repo-stats pagination; not under test
+			cfg.Hireable = tc.track
+
+			data, err := Fetch(context.Background(), env, cfg)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantBadge, data.Hireable)
+		})
+	}
 }
 
 func TestBuildCommitSearchQuery(t *testing.T) {
