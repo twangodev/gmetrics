@@ -8,26 +8,18 @@ import (
 	"github.com/twangodev/gmetrics/internal/plugin"
 )
 
-// Options control the outer-SVG frame composer.
 type Options struct {
-	// Width is the total card width in pixels.
-	Width int
-	// Title is rendered as the SVG aria-label for screen readers.
-	Title string
-	// PadTop, PadGap, PadBot, PadSide control internal padding around the
-	// stack of fragments. Zero means "use the default".
+	Width                           int
+	Title                           string
 	PadTop, PadGap, PadBot, PadSide int
 }
 
-// Framer composes plugin fragments into a single outer SVG.
 type Framer struct {
 	opts Options
 	tmpl *template.Template
 }
 
-// frameTmpl is a stdlib text/template producing the outer SVG. We use
-// text/template rather than html/template because the fragment Body values
-// are pre-sanitized SVG markup that must be emitted verbatim, not escaped.
+// text/template, not html/template: fragment bodies are pre-sanitized SVG emitted verbatim.
 const frameTmpl = `<svg xmlns="http://www.w3.org/2000/svg" width="{{.Width}}" height="{{.Height}}" viewBox="0 0 {{.Width}} {{.Height}}" role="img"{{if .Title}} aria-label="{{.Title}}"{{end}}>
 <style>{{.CSS}}</style>
 {{range .Items}}<g transform="translate({{.X}},{{.Y}})">{{.Body}}</g>
@@ -44,30 +36,34 @@ type frameData struct {
 	Items                         []framedItem
 }
 
-// NewFramer returns a Framer configured with the given options. Zero-valued
-// option fields are replaced with sensible defaults.
+const (
+	defaultWidth   = 480
+	defaultPadTop  = 16
+	defaultPadGap  = 12
+	defaultPadBot  = 16
+	defaultPadSide = 16
+)
+
 func NewFramer(opts Options) *Framer {
 	if opts.Width == 0 {
-		opts.Width = 480
+		opts.Width = defaultWidth
 	}
 	if opts.PadTop == 0 {
-		opts.PadTop = 16
+		opts.PadTop = defaultPadTop
 	}
 	if opts.PadGap == 0 {
-		opts.PadGap = 12
+		opts.PadGap = defaultPadGap
 	}
 	if opts.PadBot == 0 {
-		opts.PadBot = 16
+		opts.PadBot = defaultPadBot
 	}
 	if opts.PadSide == 0 {
-		opts.PadSide = 16
+		opts.PadSide = defaultPadSide
 	}
 	t := template.Must(template.New("frame").Parse(frameTmpl))
 	return &Framer{opts: opts, tmpl: t}
 }
 
-// Compose stacks the given fragments vertically with padding and returns the
-// final outer SVG as a string.
 func (f *Framer) Compose(frags []plugin.Fragment) (string, error) {
 	y := f.opts.PadTop
 	items := make([]framedItem, 0, len(frags))

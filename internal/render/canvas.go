@@ -1,11 +1,7 @@
-// Package render is the central rendering layer for gmetrics. It bundles a
-// font (Inter), exposes helpers plugins use to lay out text and build SVG
-// fragments, and composes those fragments into the final outer SVG.
+// Package render composes plugin SVG fragments into the final outer SVG.
 //
-// The rendering pipeline is pure-SVG with glyphs converted to outline paths.
-// This is a deliberate choice to keep the output stable when proxied through
-// GitHub's Camo image sanitizer, which strips foreignObject, scripts, and
-// external font references.
+// Glyphs are converted to outline paths so output survives GitHub's Camo
+// sanitizer, which strips foreignObject, scripts, and external font references.
 package render
 
 import (
@@ -25,9 +21,6 @@ var (
 	fontErr    error
 )
 
-// loadFonts parses Inter Regular + Bold into a canvas.FontFamily exactly once.
-// It is safe to call concurrently; the first call performs the work and
-// subsequent calls observe the cached family (or the cached error).
 func loadFonts() (*canvas.FontFamily, error) {
 	fontOnce.Do(func() {
 		ff := canvas.NewFontFamily("Inter")
@@ -54,13 +47,7 @@ func loadFonts() (*canvas.FontFamily, error) {
 	return fontFamily, fontErr
 }
 
-// Face returns a canvas font face at the given size **in pixels**.
-//
-// The underlying canvas.FontFamily.Face accepts a size in *points* and
-// converts to mm internally (Size = sizePt * mmPerPt, where mmPerPt =
-// 25.4/72). Our SVG output maps 1 canvas mm to 1 SVG user unit (1 px),
-// so a caller asking for "14 px text" needs us to pass sizePt = 14 *
-// 72/25.4 ≈ 39.7 pt to canvas. ptPerPx encapsulates that conversion.
+// canvas.Face takes points and converts to mm; our SVG maps 1mm to 1px, so px sizes need points = px * 72/25.4.
 const ptPerPx = 72.0 / 25.4
 
 func Face(sizePx float64, style canvas.FontStyle) (*canvas.FontFace, error) {
@@ -71,16 +58,11 @@ func Face(sizePx float64, style canvas.FontStyle) (*canvas.FontFace, error) {
 	return ff.Face(sizePx*ptPerPx, canvas.Black, style, canvas.FontNormal), nil
 }
 
-// NewFragment creates a virtual canvas that a plugin draws onto and a context
-// over it. The canvas is initialized with the supplied maxWidth and an
-// intentionally over-tall height; plugins should call c.Fit(margin) before
-// exporting the fragment so its bounds reflect actual drawn content.
-//
-// Units are millimeters at the canvas API layer; when exported to SVG the
-// numeric values map to pixels at 1 DPMM, which is what plugins and the
-// frame composer assume throughout this package.
+// fragmentScratchHeight is over-tall so any drawn content fits; callers call c.Fit before export to trim to actual bounds.
+const fragmentScratchHeight = 10000
+
 func NewFragment(maxWidth float64) (*canvas.Canvas, *canvas.Context) {
-	c := canvas.New(maxWidth, 10000)
+	c := canvas.New(maxWidth, fragmentScratchHeight)
 	ctx := canvas.NewContext(c)
 	return c, ctx
 }
