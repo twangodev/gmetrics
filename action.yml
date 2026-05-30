@@ -22,7 +22,7 @@ inputs:
     required: false
     default: "header, activity, community, repositories, metadata"
   base_hireable:
-    description: Show "Available for hire!" badge
+    description: Track your GitHub "Available for hire" status and show the badge when set
     required: false
     default: 'no'
   base_indepth:
