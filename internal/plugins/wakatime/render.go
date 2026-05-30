@@ -42,13 +42,11 @@ const (
 	// the two cells. (graphColW * 2 + graphColGap == fragmentWidth.)
 	graphColW   = 210.0
 	graphColGap = 20.0
-	// Within a cell, the layout is: name | bar | percent. The name column
-	// shrink-wraps to the widest label per cell (capped at 60% in
-	// drawGraphCell). The percent text sits in a fixed-width slot on the
-	// right; the bar fills whatever's left in between.
-	graphNameBarGap  = 6.0
-	graphBarPctGap   = 6.0
-	graphPercentColW = 32.0
+	// Within a cell, the layout is: name | bar | time. The name and time
+	// columns both shrink-wrap to their widest label per cell (each capped in
+	// drawGraphCell); the bar fills whatever's left in between.
+	graphNameBarGap = 6.0
+	graphBarPctGap  = 6.0
 )
 
 // barPalette is a small fixed color cycle used for the graph bars. Distinct
@@ -401,28 +399,49 @@ func drawGraphCell(ctx *canvas.Context, x0, y0, cellW float64, key string, items
 	drawLine(ctx, x0, y0, headerFace, captionFor(key))
 	y := y0 + float64(graphHeader)
 
-	// Layout columns inside the cell. The name column shrink-wraps to the
-	// widest label in this cell but caps at 60% of the cell width, so bars
-	// always get at least the remaining ~40%. Labels longer than the cap
-	// are pixel-truncated below.
+	// Column layout: name | bar | time. The name column shrink-wraps to its
+	// widest label (capped at 60% of the cell) and the time column to its
+	// widest label (capped); the bar fills the remaining width. Names longer
+	// than the cap are pixel-truncated below.
 	const nameColMaxFrac = 0.60
+	const valueColMax = 72.0
 	nameColMax := nameColMaxFrac * cellW
-	maxLabel := 0.0
-	for _, it := range items {
-		if w := rowFace.TextWidth(it.Name); w > maxLabel {
-			maxLabel = w
+
+	timeLabels := make([]string, len(items))
+	nameColW, valueColW := 0.0, 0.0
+	for i, it := range items {
+		if w := rowFace.TextWidth(it.Name); w > nameColW {
+			nameColW = w
+		}
+		timeLabels[i] = formatDuration(it.Seconds)
+		if w := rowFace.TextWidth(timeLabels[i]); w > valueColW {
+			valueColW = w
 		}
 	}
-	nameColW := maxLabel
 	if nameColW > nameColMax {
 		nameColW = nameColMax
 	}
+	if valueColW > valueColMax {
+		valueColW = valueColMax
+	}
+
 	nameX := x0
-	pctX := x0 + cellW - graphPercentColW
+	valueRight := x0 + cellW
+	valueX := valueRight - valueColW
 	barX := nameX + nameColW + graphNameBarGap
-	barW := pctX - graphBarPctGap - barX
+	barW := valueX - graphBarPctGap - barX
 	if barW < 20 {
 		barW = 20
+	}
+
+	// Bars are scaled relative to the most-used item in this cell (the first,
+	// since items are sorted descending), so the top item fills the bar and
+	// the rest are proportional to it.
+	maxSeconds := 0.0
+	for _, it := range items {
+		if it.Seconds > maxSeconds {
+			maxSeconds = it.Seconds
+		}
 	}
 
 	// Vertically center text and bar within the row. drawLine treats its y
@@ -438,12 +457,32 @@ func drawGraphCell(ctx *canvas.Context, x0, y0, cellW float64, key string, items
 		rowY := y + rowTextOffset
 		drawLine(ctx, nameX, rowY, rowFace, render.TruncateToWidth(it.Name, rowFace, nameColW))
 
+		frac := 0.0
+		if maxSeconds > 0 {
+			frac = it.Seconds / maxSeconds
+		}
 		barY := y + (graphRowH-barHeight)/2.0
-		drawBarW(ctx, barX, barY, barW, it.Percent, barColorFor(key, it.Name, i))
+		drawBarW(ctx, barX, barY, barW, frac, barColorFor(key, it.Name, i))
 
-		percent := fmt.Sprintf("%d%%", int(it.Percent*100+0.5))
-		drawLine(ctx, pctX, rowY, rowFace, percent)
+		// Right-align the time label to the cell's right edge.
+		label := timeLabels[i]
+		drawLine(ctx, valueRight-rowFace.TextWidth(label), rowY, rowFace, label)
 		y += graphRowH
+	}
+}
+
+// formatDuration renders a coding-time duration compactly for the bar value
+// column: "27h 1m", "8h", or "45m". Sub-minute values round to "0m".
+func formatDuration(seconds float64) string {
+	totalMin := int(seconds/60 + 0.5)
+	h, m := totalMin/60, totalMin%60
+	switch {
+	case h > 0 && m > 0:
+		return fmt.Sprintf("%dh %dm", h, m)
+	case h > 0:
+		return fmt.Sprintf("%dh", h)
+	default:
+		return fmt.Sprintf("%dm", m)
 	}
 }
 
