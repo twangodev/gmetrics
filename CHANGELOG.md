@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.4.0](https://github.com/twangodev/gmetrics/compare/v1.3.0...v1.4.0) (2026-05-30)
+
+
+### Features
+
+* **render:** rounded thumbnail corners (music art + steam icons) ([cf5ad21](https://github.com/twangodev/gmetrics/commit/cf5ad21683f0e4989f426a62ddc728b74376e474))
+* **steam:** per-game stats — playtime share, last played, platform, achievements ([cf201fc](https://github.com/twangodev/gmetrics/commit/cf201fca475dc6029f38fcbaffcff8a612e09796))
+* **wakatime:** relative bars scaled by time, labels in time units ([#14](https://github.com/twangodev/gmetrics/issues/14)) ([02498fa](https://github.com/twangodev/gmetrics/commit/02498fa5ede1a52c381220791fede80e8290a6e7))
+* **wakatime:** round the bar-chart bars ([#12](https://github.com/twangodev/gmetrics/issues/12)) ([75990e8](https://github.com/twangodev/gmetrics/commit/75990e84978b1ca15c699f773668b8f7c35037fd))
+
+
+### Bug Fixes
+
+* **base:** skip GraphQL and omit fragment when no sections ([#13](https://github.com/twangodev/gmetrics/issues/13)) ([9724a17](https://github.com/twangodev/gmetrics/commit/9724a17a4ea05ea02db521e5f58c3fa7477632ef))
+* **wakatime:** render chart text in the card body gray ([33bc515](https://github.com/twangodev/gmetrics/commit/33bc515a55162ffb2917aed4c71415f6ba6bbf78))
+
 ## [1.3.0](https://github.com/twangodev/gmetrics/compare/v1.2.0...v1.3.0) (2026-05-29)
 
 
