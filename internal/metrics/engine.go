@@ -1,9 +1,5 @@
-// Package metrics implements the orchestration engine that drives one card
-// render: it runs the always-on base plugin first (so downstream plugins can
-// rely on the populated UserContext), fans out the enabled optional plugins
-// for parallel Fetch via errgroup, then renders each result sequentially in a
-// deterministic layout order. Errors from optional plugins are either
-// aborting (Strict mode) or replaced with a graceful error fragment.
+// Package metrics orchestrates one card render: base plugin first, then a
+// parallel fetch and deterministic render of the enabled optional plugins.
 package metrics
 
 import (
@@ -22,64 +18,38 @@ import (
 	"github.com/twangodev/gmetrics/internal/plugins/wakatime"
 )
 
-// Engine orchestrates one card render: base first, then fan-out fetch + render
-// for the enabled optional plugins.
 type Engine struct {
-	// Env is the runtime context handed to every plugin. The caller is
-	// responsible for building this with authenticated REST/GraphQL/HTTP
-	// clients, a logger, and the target user's Login. The engine populates
-	// Env.User from the base plugin's output before invoking any other
-	// plugin's Fetch.
 	Env *plugin.Env
-	// Strict, when true, causes any plugin error (in Fetch or Render) to
-	// abort the entire render. When false, individual plugin errors are
-	// substituted with a graceful error fragment so the rest of the card
-	// still renders.
+	// Strict aborts the whole render on any plugin error; otherwise each
+	// failing plugin is replaced with a graceful error fragment.
 	Strict bool
 }
 
-// pluginRun pairs a registered plugin with its typed config so the parallel
-// fetch loop can dispatch each plugin without re-deriving its config.
 type pluginRun struct {
 	name string
 	p    plugin.Plugin
 	cfg  any
 }
 
-// pluginResult is the per-plugin output of the parallel fetch phase. It is
-// keyed by index into the runs slice so the deterministic render order can
-// be restored regardless of completion order.
 type pluginResult struct {
 	name string
 	data any
 	err  error
 }
 
-// Render returns the fragments in display order: [base] followed by the
-// enabled optional plugins in the canonical layout order
-// (languages, people, wakatime, music, steam). In non-strict mode any
-// fetch/render error is replaced with plugin.ErrorFragment so siblings still
-// render. In strict mode the first error aborts and is returned to the caller.
 func (e *Engine) Render(ctx context.Context, cfg *config.Config) ([]plugin.Fragment, error) {
 	frags := make([]plugin.Fragment, 0, 6)
 
-	// 1. Base plugin (sequential — populates Env.User used by other plugins).
 	baseFrag, baseData, err := e.runBase(ctx, cfg)
 	if err != nil {
-		// Only reachable in strict mode; non-strict always returns a
-		// graceful error fragment instead.
 		return nil, err
 	}
-	// base renders an empty body when it has no sections (base: ''); omit it
-	// so a plugins-only card has no leading gap.
 	if baseFrag.Body != "" {
 		frags = append(frags, baseFrag)
 	}
 
-	// 2. Assemble the deterministic list of optional plugins to run.
 	runs := assembleRuns(cfg, e.Env)
 
-	// 3. Parallel fetch.
 	results := make([]pluginResult, len(runs))
 	g, gctx := errgroup.WithContext(ctx)
 	for i, r := range runs {
@@ -94,17 +64,12 @@ func (e *Engine) Render(ctx context.Context, cfg *config.Config) ([]plugin.Fragm
 		})
 	}
 	if err := g.Wait(); err != nil {
-		// Strict mode: any fetch error aborts. Soft-fail paths return nil
-		// from the goroutine so this only fires when Strict is true.
 		return nil, err
 	}
 
-	// 4. Render sequentially in runs order (preserves layout determinism).
 	for i, r := range runs {
 		res := results[i]
 		if res.err != nil {
-			// Strict mode already short-circuited above. Here we only reach
-			// non-strict path: substitute an error fragment so siblings show.
 			e.Env.Log.Error("plugin fetch failed", "plugin", r.name, "err", res.err)
 			frags = append(frags, plugin.ErrorFragment(r.name, res.err))
 			continue
@@ -121,7 +86,6 @@ func (e *Engine) Render(ctx context.Context, cfg *config.Config) ([]plugin.Fragm
 		frags = append(frags, frag)
 	}
 
-	// Metadata footer: appended last so it sits below every plugin.
 	if includesSection(cfg.Base.Sections, "metadata") && baseData != nil {
 		if metaFrag, err := base.MetadataFragment(baseData); err == nil && metaFrag.Body != "" {
 			frags = append(frags, metaFrag)
@@ -142,12 +106,7 @@ func includesSection(xs []string, s string) bool {
 	return false
 }
 
-// runBase fetches + renders the base plugin and (on success) populates
-// Env.User from its output so downstream plugins can read it. In strict mode
-// the first error short-circuits and is returned to the caller. In non-strict
-// mode errors are logged and a graceful error fragment is substituted so the
-// rest of the card still renders; the returned error is always nil in that
-// path.
+// runBase populates Env.User from the base output so downstream plugins can read it.
 func (e *Engine) runBase(ctx context.Context, cfg *config.Config) (plugin.Fragment, any, error) {
 	bp, ok := plugin.Lookup("base")
 	if !ok {
@@ -181,8 +140,6 @@ func (e *Engine) runBase(ctx context.Context, cfg *config.Config) (plugin.Fragme
 		return plugin.ErrorFragment("base", err), nil, nil
 	}
 
-	// Populate Env.User for downstream plugins. Per the locked API, the
-	// base plugin guarantees its Fetch return value is a base.Data.
 	if bd, ok := data.(base.Data); ok {
 		e.Env.User = bd.User
 	}
@@ -198,10 +155,8 @@ func (e *Engine) runBase(ctx context.Context, cfg *config.Config) (plugin.Fragme
 	return frag, data, nil
 }
 
-// assembleRuns returns the deterministic, layout-ordered list of optional
-// plugins to run for this render. Plugins disabled in cfg are skipped; a
-// plugin that fails to look up (e.g. a typo in registration) is logged at
-// warn level and dropped from the run set.
+const defaultLanguagesIndepthCachePath = ".gmetrics-cache/languages-indepth.json"
+
 func assembleRuns(cfg *config.Config, env *plugin.Env) []pluginRun {
 	runs := make([]pluginRun, 0, 5)
 
@@ -210,7 +165,7 @@ func assembleRuns(cfg *config.Config, env *plugin.Env) []pluginRun {
 			lc := cfg.Plugins.Languages
 			cachePath := lc.IndepthCache
 			if lc.Indepth && cachePath == "" {
-				cachePath = ".gmetrics-cache/languages-indepth.json"
+				cachePath = defaultLanguagesIndepthCachePath
 			}
 			runs = append(runs, pluginRun{
 				name: "languages",
@@ -250,8 +205,7 @@ func assembleRuns(cfg *config.Config, env *plugin.Env) []pluginRun {
 		}
 	}
 
-	// Music renders before WakaTime to mirror upstream's sidebar layout
-	// (Recently played → WakaTime → Steam).
+	// Music precedes WakaTime to match upstream's sidebar layout.
 	if cfg.Plugins.Music.Enabled {
 		if p, ok := plugin.Lookup("music"); ok {
 			mc := cfg.Plugins.Music
