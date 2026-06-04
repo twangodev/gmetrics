@@ -15,8 +15,6 @@ import (
 // must match the other plugins so stacked cards align.
 const fragmentWidth = 440
 
-const avatarSize = 48
-
 const gameIconSize = 32
 
 const (

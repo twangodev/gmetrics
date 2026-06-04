@@ -88,7 +88,7 @@ func doJSON(ctx context.Context, hc *http.Client, rawURL string, out any) error 
 		return fmt.Errorf("GET %s: %s", urlWithoutQuery(rawURL), resp.Status)
 	}
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		return fmt.Errorf("decode %s: %w", rawURL, err)
+		return fmt.Errorf("decode %s: %w", urlWithoutQuery(rawURL), err)
 	}
 	return nil
 }
