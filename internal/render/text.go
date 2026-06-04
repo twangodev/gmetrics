@@ -86,7 +86,7 @@ func EmitTextPathRightAlignedClass(w io.Writer, rightX, baselineY int, s string,
 	if s == "" {
 		return
 	}
-	width := face.TextWidth(s)
+	width := TextWidth(face, s)
 	x := rightX - int(width+0.5)
 	EmitTextPathClass(w, x, baselineY, s, face, class)
 }
@@ -108,18 +108,18 @@ func EmitRoundedClip(w io.Writer, id string, radiusFrac float64) {
 // under face fits within maxW pixels, appending an ellipsis when clipped.
 // Binary-searches the largest prefix that still fits with the ellipsis.
 func TruncateToWidth(s string, face *canvas.FontFace, maxW float64) string {
-	if s == "" || face.TextWidth(s) <= maxW {
+	if s == "" || TextWidth(face, s) <= maxW {
 		return s
 	}
 	const ellipsis = "…"
-	if face.TextWidth(ellipsis) > maxW {
+	if TextWidth(face, ellipsis) > maxW {
 		return ""
 	}
 	runes := []rune(s)
 	lo, hi := 0, len(runes)
 	for lo < hi {
 		mid := (lo + hi + 1) / 2
-		if face.TextWidth(string(runes[:mid])+ellipsis) <= maxW {
+		if TextWidth(face, string(runes[:mid])+ellipsis) <= maxW {
 			lo = mid
 		} else {
 			hi = mid - 1
@@ -128,14 +128,100 @@ func TruncateToWidth(s string, face *canvas.FontFace, maxW float64) string {
 	return string(runes[:lo]) + ellipsis
 }
 
-// PathDataFor converts a string to SVG path data using the supplied face.
-// Returns the empty string when the font produces no glyph paths (e.g.
-// the input is whitespace only); callers fall through gracefully.
+// fontRun is a maximal substring of a string that shares one face after
+// splitting by glyph coverage.
+type fontRun struct {
+	face *canvas.FontFace
+	text string
+}
+
+// faceFor picks the face that can draw r: the primary face when it has the
+// glyph, otherwise the fallback face. Runes neither covers stay on the primary
+// so its .notdef (tofu) renders as a last resort rather than vanishing.
+func faceFor(primary, fallback *canvas.FontFace, r rune) *canvas.FontFace {
+	if primary.Font.SFNT.GlyphIndex(r) != 0 {
+		return primary
+	}
+	if fallback != nil && fallback.Font.SFNT.GlyphIndex(r) != 0 {
+		return fallback
+	}
+	return primary
+}
+
+// splitRuns breaks s into consecutive runs, each drawn by a single face. The
+// primary (Inter) keeps Latin and anything it covers; the fallback (Noto Sans
+// KR) takes Hangul, kana, and CJK ideographs Inter lacks.
+func splitRuns(primary, fallback *canvas.FontFace, s string) []fontRun {
+	var runs []fontRun
+	var b strings.Builder
+	var cur *canvas.FontFace
+	flush := func() {
+		if b.Len() > 0 {
+			runs = append(runs, fontRun{cur, b.String()})
+			b.Reset()
+		}
+	}
+	for _, r := range s {
+		f := faceFor(primary, fallback, r)
+		if cur != nil && f != cur {
+			flush()
+		}
+		cur = f
+		b.WriteRune(r)
+	}
+	flush()
+	return runs
+}
+
+// TextWidth returns the rendered width of s, measuring each run with the face
+// that actually draws it so CJK advances come from Noto, not Inter's .notdef.
+func TextWidth(face *canvas.FontFace, s string) float64 {
+	fallback := fallbackFaceFor(face)
+	if fallback == nil {
+		return face.TextWidth(s)
+	}
+	w := 0.0
+	for _, run := range splitRuns(face, fallback, s) {
+		w += run.face.TextWidth(run.text)
+	}
+	return w
+}
+
+// PathDataFor converts a string to SVG path data using the supplied face,
+// falling back to Noto Sans KR for runes Inter cannot draw. Each run is laid
+// out at the origin then translated by the accumulated advance so the runs sit
+// left-to-right in a single path. Returns the empty string when the input
+// produces no glyph paths (e.g. whitespace only); callers fall through
+// gracefully.
 //
 // The output is run through SanitizePathData so a malformed command (e.g.
 // a 5-arg cubic Bezier emitted by tdewolff/canvas when two coordinates
 // fuse) doesn't poison the rest of the path in resvg / Chromium.
 func PathDataFor(face *canvas.FontFace, s string) string {
+	fallback := fallbackFaceFor(face)
+	if fallback == nil {
+		return pathDataSingle(face, s)
+	}
+	var b strings.Builder
+	x := 0.0
+	for _, run := range splitRuns(face, fallback, s) {
+		if p, _, err := run.face.ToPath(run.text); err == nil && p != nil && !p.Empty() {
+			if x != 0 {
+				p = p.Translate(x, 0)
+			}
+			if d := SanitizePathData(p.ToSVG()); d != "" {
+				if b.Len() > 0 {
+					b.WriteByte(' ')
+				}
+				b.WriteString(d)
+			}
+		}
+		x += run.face.TextWidth(run.text)
+	}
+	return b.String()
+}
+
+func pathDataSingle(face *canvas.FontFace, s string) string {
 	p, _, err := face.ToPath(s)
 	if err != nil || p == nil || p.Empty() {
 		return ""
