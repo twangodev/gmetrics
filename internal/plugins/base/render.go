@@ -216,7 +216,7 @@ func renderHeader(w *strings.Builder, y0 int, d Data, ctx sectionContext) int {
 	nameX := avatarSize + 6 // 6px gutter between avatar and name
 	render.EmitTextPathClass(w, nameX, y0+nameLineY, name, ctx.nameFace, "text-h1")
 	if d.User.Login != "" {
-		nameWidth := int(ctx.nameFace.TextWidth(name) + 0.5)
+		nameWidth := int(render.TextWidth(ctx.nameFace, name) + 0.5)
 		render.EmitTextPathClass(w, nameX+nameWidth+8, y0+nameLineY, "@"+d.User.Login, ctx.loginFace, "text-muted")
 	}
 
@@ -559,7 +559,7 @@ func emitHireablePill(w *strings.Builder, rightX, topY int, face *canvas.FontFac
 		pillH  = 18
 		accent = "#1a7f37"
 	)
-	pillW := int(face.TextWidth(text)+0.5) + 2*padX
+	pillW := int(render.TextWidth(face, text)+0.5) + 2*padX
 	pillX := rightX - pillW
 	fmt.Fprintf(w,
 		`<rect x="%d" y="%d" width="%d" height="%d" rx="%d" fill="none" stroke="%s" stroke-width="1"/>`,
