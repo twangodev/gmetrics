@@ -65,8 +65,6 @@ func Render(_ *plugin.Env, data Data) (plugin.Fragment, error) {
 	firstDrawn := true
 	for i := 0; i < len(data.Sections); i++ {
 		sec := data.Sections[i]
-		var h int
-		var drew bool
 
 		next := ""
 		if i+1 < len(data.Sections) {
@@ -75,21 +73,25 @@ func Render(_ *plugin.Env, data Data) (plugin.Fragment, error) {
 		activityCommunityAdjacent := (sec == "activity" && next == "community") ||
 			(sec == "community" && next == "activity")
 
+		drawY := y
+		if !firstDrawn {
+			drawY += sectionGap
+		}
+
+		var h int
+		var drew bool
 		if activityCommunityAdjacent {
-			h = renderActivityCommunityRow(&body, y, data, ctx)
+			h = renderActivityCommunityRow(&body, drawY, data, ctx)
 			drew = true
 			i++
 		} else {
-			h, drew = renderSection(&body, y, sec, data, ctx)
+			h, drew = renderSection(&body, drawY, sec, data, ctx)
 		}
 
 		if !drew {
 			continue
 		}
-		if !firstDrawn {
-			y += sectionGap
-		}
-		y += h
+		y = drawY + h
 		firstDrawn = false
 	}
 

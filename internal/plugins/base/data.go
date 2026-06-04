@@ -10,7 +10,7 @@ type Activity struct {
 	PRsReviewed  int
 	IssuesOpened int
 	Comments     int
-	// When non-zero, replaces Commits: the per-pattern search counts multiple email identities.
+	// Replaces Commits whenever an authored-commit query succeeds; the per-pattern search counts multiple email identities.
 	AuthoredCommits int
 }
 
@@ -45,7 +45,7 @@ type Metadata struct {
 
 type Data struct {
 	User          plugin.UserContext
-	AvatarB64     string // data: URL; empty when the avatar fetch failed.
+	AvatarB64     string // data: URL; empty when no avatar URL, no HTTP client, or the fetch failed.
 	Activity      Activity
 	Community     Community
 	Repositories  Repositories
