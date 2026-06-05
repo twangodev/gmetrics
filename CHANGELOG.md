@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/twangodev/gmetrics/compare/v1.4.0...v1.5.0) (2026-05-30)
+
+
+### Features
+
+* **base:** track GitHub hireable status for the badge ([#15](https://github.com/twangodev/gmetrics/issues/15)) ([0c3e7b1](https://github.com/twangodev/gmetrics/commit/0c3e7b1999977fe6a2c0751fa9557e661bf003ae))
+
 ## [1.4.0](https://github.com/twangodev/gmetrics/compare/v1.3.0...v1.4.0) (2026-05-30)
 
 

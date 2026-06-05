@@ -325,11 +325,11 @@ func drawGraphCell(ctx *canvas.Context, x0, y0, cellW float64, key string, items
 	timeLabels := make([]string, len(items))
 	nameColW, valueColW := 0.0, 0.0
 	for i, it := range items {
-		if w := rowFace.TextWidth(it.Name); w > nameColW {
+		if w := render.TextWidth(rowFace, it.Name); w > nameColW {
 			nameColW = w
 		}
 		timeLabels[i] = formatDuration(it.Seconds)
-		if w := rowFace.TextWidth(timeLabels[i]); w > valueColW {
+		if w := render.TextWidth(rowFace, timeLabels[i]); w > valueColW {
 			valueColW = w
 		}
 	}
@@ -373,7 +373,7 @@ func drawGraphCell(ctx *canvas.Context, x0, y0, cellW float64, key string, items
 		drawBarW(ctx, barX, barY, barW, frac, barColorFor(key, it.Name, i))
 
 		timeLabel := timeLabels[i]
-		rightAlignedX := valueRight - rowFace.TextWidth(timeLabel)
+		rightAlignedX := valueRight - render.TextWidth(rowFace, timeLabel)
 		drawLine(ctx, rightAlignedX, rowY, rowFace, timeLabel)
 		y += graphRowH
 	}
