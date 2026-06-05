@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/twangodev/gmetrics/compare/v1.5.0...v1.6.0) (2026-06-05)
+
+
+### Features
+
+* **render:** fall back to Noto Sans KR for CJK glyphs ([#18](https://github.com/twangodev/gmetrics/issues/18)) ([1b86662](https://github.com/twangodev/gmetrics/commit/1b86662c5f2d343f43196c71eb7ca2dd7a44d5ef))
+
 ## [1.5.0](https://github.com/twangodev/gmetrics/compare/v1.4.0...v1.5.0) (2026-05-30)
 
 
