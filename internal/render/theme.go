@@ -1,17 +1,7 @@
 package render
 
-// ClassicCSS is the embedded <style> block for the outer SVG. The values are
-// written inline (not loaded from an external stylesheet) so they survive
-// GitHub's Camo image proxy, which strips external references and script
-// content from SVGs served through `<img>` tags.
-//
-// Colors mirror upstream lowlighter/metrics classic template
-// (reference/lowlighter-metrics/source/templates/classic/style.css):
-// default text #777777, headings/accent #0366d6, muted #666666,
-// icon fill #959da5. The card is light-mode only — upstream has no
-// prefers-color-scheme: dark rules, so neither do we; this keeps the
-// rendered SVG visually identical whether the viewer is in light or
-// dark mode.
+// Styles are inline (not external) to survive GitHub's Camo proxy, which strips
+// external references from SVGs served via <img>. Light-mode only, matching upstream.
 const ClassicCSS = `
 text {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";

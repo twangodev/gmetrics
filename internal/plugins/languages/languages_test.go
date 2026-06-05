@@ -34,19 +34,13 @@ func TestRender_BarHasSegments(t *testing.T) {
 	require.Equal(t, fragmentWidth, frag.Width)
 	require.Positive(t, frag.Height)
 
-	// The bar contributes three colored <rect> segments (one per
-	// language) and the legend contributes three <circle> markers, so
-	// the body must contain at least three of each. We don't assert
-	// exact counts because the rendering details around the
-	// header/clip-path may evolve.
-	rectCount := strings.Count(frag.Body, "<rect")
-	require.GreaterOrEqual(t, rectCount, 3,
-		"want at least 3 <rect> elements in body, got %d:\n%s", rectCount, frag.Body)
-	circleCount := strings.Count(frag.Body, "<circle")
-	require.GreaterOrEqual(t, circleCount, 3,
-		"want at least 3 <circle> legend markers, got %d:\n%s", circleCount, frag.Body)
+	barSegmentRects := strings.Count(frag.Body, "<rect")
+	require.GreaterOrEqual(t, barSegmentRects, 3,
+		"want at least 3 <rect> elements in body, got %d:\n%s", barSegmentRects, frag.Body)
+	legendMarkers := strings.Count(frag.Body, "<circle")
+	require.GreaterOrEqual(t, legendMarkers, 3,
+		"want at least 3 <circle> legend markers, got %d:\n%s", legendMarkers, frag.Body)
 
-	// Sanity: the language colors actually appear in the output.
 	require.Contains(t, frag.Body, "#00ADD8")
 	require.Contains(t, frag.Body, "#3178c6")
 	require.Contains(t, frag.Body, "#3572A5")
@@ -55,19 +49,13 @@ func TestRender_BarHasSegments(t *testing.T) {
 func TestFetch_NonIndepth_AggregatesAndFilters(t *testing.T) {
 	t.Parallel()
 
-	// Mock GraphQL endpoint. We return one page of two repositories:
-	//   repo1: Go=1000, Markdown=200
-	//   repo2: Go=500, TypeScript=300
-	// With cfg.Ignored = ["markdown"] the expected aggregate is:
-	//   Go=1500, TypeScript=300
 	mux := http.NewServeMux()
 	pageCount := 0
 	mux.HandleFunc("/graphql", func(w http.ResponseWriter, req *http.Request) {
 		require.Equal(t, http.MethodPost, req.Method)
 		pageCount++
-		// Two repos with two languages each. Single page (no NextPage).
 		w.Header().Set("Content-Type", "application/json")
-		resp := map[string]any{
+		singlePageTwoRepos := map[string]any{
 			"data": map[string]any{
 				"user": map[string]any{
 					"repositories": map[string]any{
@@ -101,7 +89,7 @@ func TestFetch_NonIndepth_AggregatesAndFilters(t *testing.T) {
 				},
 			},
 		}
-		_ = json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(singlePageTwoRepos)
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -132,9 +120,7 @@ func TestFetch_NonIndepth_AggregatesAndFilters(t *testing.T) {
 	require.InDelta(t, 1500.0/1800.0, data.Langs[0].Percent, 1e-9)
 	require.InDelta(t, 300.0/1800.0, data.Langs[1].Percent, 1e-9)
 
-	// The GraphQL response included a color hint, so the assembled Lang
-	// row should carry the GraphQL-supplied color verbatim (it wins over
-	// defaultColors).
+	// GraphQL-supplied color wins over the defaultColors fallback.
 	require.Equal(t, "#00ADD8", data.Langs[0].Color)
 	require.Equal(t, "#3178c6", data.Langs[1].Color)
 }

@@ -73,10 +73,8 @@ func classifyWalkErr(err error) (walkErrKind, string) {
 	}
 }
 
-// buildAuthorPredicates returns lower-cased substrings to pass as
-// `--author=` patterns. ".user.login" expands into the bare login plus
-// both GitHub noreply forms; emails bound to the user's public GPG keys
-// are also auto-included.
+const loginPlaceholder = ".user.login"
+
 func buildAuthorPredicates(ctx context.Context, env *plugin.Env, cfg Config) []string {
 	login := env.Login
 	if login == "" {
@@ -104,7 +102,7 @@ func buildAuthorPredicates(ctx context.Context, env *plugin.Env, cfg Config) []s
 		if entry == "" {
 			continue
 		}
-		if entry == ".user.login" {
+		if entry == loginPlaceholder {
 			if loginLower == "" {
 				continue
 			}
@@ -136,9 +134,7 @@ func buildAuthorPredicates(ctx context.Context, env *plugin.Env, cfg Config) []s
 	return out
 }
 
-// authorMatches checks the case-insensitive `Name <Email>` header against
-// every predicate as a substring. Kept for unit tests; the production
-// walk delegates this to `git log --author=` directly.
+// Production clone walks delegate to `git log --author=`; this stays for the API path and tests.
 func authorMatches(preds []string, name, email string) bool {
 	if len(preds) == 0 {
 		return false
@@ -417,8 +413,7 @@ func walkRepo(ctx context.Context, cloneURL string, preds []string) (walkResult,
 		"--no-merges",
 		"--numstat",
 		"--regexp-ignore-case",
-		// tformat: prefix is required so git treats the rest as literal,
-		// not a named built-in format.
+		// tformat: prefix forces git to treat the rest as literal, not a named built-in format.
 		"--format=tformat:" + commitMarker,
 	}
 	for _, p := range preds {
@@ -430,8 +425,7 @@ func walkRepo(ctx context.Context, cloneURL string, preds []string) (walkResult,
 	runErrCh := make(chan error, 1)
 	tLog := time.Now()
 	go func() {
-		// AddOptions overwrites Command.ctx, so the ctx must be passed
-		// inside CommandOptions — not via NewCommandWithContext.
+		// AddOptions overwrites Command.ctx, so ctx must travel inside CommandOptions, not NewCommandWithContext.
 		runErrCh <- gitcmd.NewCommand(args...).
 			AddOptions(gitcmd.CommandOptions{
 				Context: ctx,
@@ -474,16 +468,16 @@ func walkRepo(ctx context.Context, cloneURL string, preds []string) (walkResult,
 	return res, nil
 }
 
-// classifyNumstatLine parses one `<added>\t<deleted>\t<path>` line from
-// `git log --numstat` and returns (language, addedLines, true) if the
-// path is a non-vendored programming/markup file enry can identify.
+const numstatBinaryMarker = "-"
+
 func classifyNumstatLine(line string) (string, int, bool) {
-	parts := strings.SplitN(line, "\t", 3)
-	if len(parts) != 3 {
+	const addedField, pathField, numstatFieldCount = 0, 2, 3
+	parts := strings.SplitN(line, "\t", numstatFieldCount)
+	if len(parts) != numstatFieldCount {
 		return "", 0, false
 	}
-	added, path := parts[0], parts[2]
-	if added == "-" { // binary
+	added, path := parts[addedField], parts[pathField]
+	if added == numstatBinaryMarker {
 		return "", 0, false
 	}
 	addedN, err := strconv.Atoi(added)
@@ -508,11 +502,7 @@ func classifyNumstatLine(line string) (string, int, bool) {
 	return "", 0, false
 }
 
-// classifyPath returns enry's best-guess language for path using only
-// the filename (GetLanguageByFilename catches full-name matches like
-// Dockerfile; GetLanguages disambiguates extensions where the default
-// candidate would otherwise be wrong, e.g. .md → Markdown not "GCC
-// Machine Description").
+// GetLanguages disambiguates ambiguous extensions GetLanguageByFilename misses, e.g. .md -> Markdown not "GCC Machine Description".
 func classifyPath(path string) string {
 	if lang, _ := enry.GetLanguageByFilename(path); lang != "" {
 		return lang
@@ -530,7 +520,7 @@ type repoTask struct {
 	FullName      string
 	CloneURL      string
 	SizeKB        int
-	Source        string // "owned" or "contributed"
+	Source        string
 	PushedAt      string
 	DefaultBranch string
 }

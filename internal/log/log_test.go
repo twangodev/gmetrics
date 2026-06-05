@@ -20,7 +20,6 @@ func TestNewLogger_WritesKeyValuesInNonTTY(t *testing.T) {
 }
 
 func TestNewLogger_NilWriterDefaultsToStderr(t *testing.T) {
-	// Should not panic; just verify constructor returns a non-nil logger.
 	l := gmlog.NewLogger(gmlog.Options{})
 	if l == nil {
 		t.Fatal("expected non-nil logger")

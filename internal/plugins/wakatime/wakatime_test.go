@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -56,10 +55,9 @@ func TestFetch_DecodesAPIResponse(t *testing.T) {
 	require.NotEmpty(t, data.Languages)
 	require.NotEmpty(t, data.Editors)
 	require.NotEmpty(t, data.OSes)
-	// Percent should be normalized to [0,1].
+	// API reports percent in 0-100; fetch normalizes to 0-1.
 	require.InDelta(t, 0.60, data.Languages[0].Percent, 0.001)
-	// Ordering: highest percent first within a category.
-	require.Equal(t, "foo", data.Projects[0].Name)
+	require.Equal(t, "foo", data.Projects[0].Name, "highest percent sorts first")
 }
 
 func TestRender_AllSections_ProducesSVG(t *testing.T) {
@@ -98,15 +96,11 @@ func TestRender_AllSections_ProducesSVG(t *testing.T) {
 	require.NotEmpty(t, frag.Body)
 	require.Greater(t, frag.Height, 100)
 	require.Equal(t, 440, frag.Width)
-	// The fragment is wrapped by the framer at compose time, so it must
-	// not contain a root `<svg width=...` wrapper of its own. Inline
-	// octicons emit `<svg x=...>` glyph blocks; those are expected. The
-	// guard below catches a regression that re-emits an outer document.
+	// Framer wraps the fragment at compose time; an outer SVG document here is a regression (inline octicon `<svg x=...>` glyphs are fine).
 	require.NotContains(t, frag.Body, `<svg xmlns`,
 		"fragment must not contain an outer SVG document element")
 	require.NotContains(t, frag.Body, `<svg width=`,
 		"fragment must not contain an outer SVG document element")
-	_ = strings.TrimSpace // keep the import live for future assertions
 }
 
 func TestPlugin_RegistersUnderName(t *testing.T) {

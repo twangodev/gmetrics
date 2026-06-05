@@ -21,10 +21,10 @@ const (
 	legendStartY    = 68
 	legendRowHeight = 22
 	legendBottomPad = 16
+
+	detailPercentage = "percentage"
 )
 
-// renderFragment lays out the languages section: h2 with code icon, h3
-// + optional indepth caption, the stacked bar, and a 2-column legend.
 func renderFragment(_ *plugin.Env, data Data) (plugin.Fragment, error) {
 	h2Face, err := render.Face(16, canvas.FontRegular)
 	if err != nil {
@@ -75,8 +75,7 @@ func renderFragment(_ *plugin.Env, data Data) (plugin.Fragment, error) {
 			fragmentWidth, barHeight,
 		)
 		fmt.Fprintf(&buf, `<g clip-path="url(#languages-bar-clip)">`)
-		// Accumulate float positions and round at boundaries so segments
-		// align exactly without leaving 1-2px gaps at the bar's right edge.
+		// Round at segment boundaries, not widths, so rounding error never opens a gap.
 		x := 0.0
 		for i, l := range langs {
 			segWidth := l.Percent * fragmentWidth
@@ -115,8 +114,6 @@ func renderFragment(_ *plugin.Env, data Data) (plugin.Fragment, error) {
 	}, nil
 }
 
-// writeLegendRow draws one cell of the 2-column legend: color dot + name
-// + (optional) right-aligned percentage.
 func writeLegendRow(buf *bytes.Buffer, l Lang, x, y int, details []string, face *canvas.FontFace) {
 	const circleR = 5
 	cx := x + circleR + 1
@@ -130,7 +127,7 @@ func writeLegendRow(buf *bytes.Buffer, l Lang, x, y int, details []string, face 
 	textY := y + legendRowHeight/2 + 4
 	render.EmitTextPath(buf, textX, textY, l.Name, face)
 
-	if includesString(details, "percentage") {
+	if includesString(details, detailPercentage) {
 		colRightEdge := x + (fragmentWidth / 2) - 8
 		render.EmitTextPathRightAlignedClass(buf, colRightEdge, textY, formatPercent(l.Percent), face, "text-muted")
 	}
@@ -160,7 +157,6 @@ func percentSummary(l Lang) string {
 	return fmt.Sprintf("%s (%s)", l.Name, formatPercent(l.Percent))
 }
 
-// includesString reports whether s appears in xs.
 func includesString(xs []string, s string) bool {
 	for _, x := range xs {
 		if x == s {
@@ -170,19 +166,15 @@ func includesString(xs []string, s string) bool {
 	return false
 }
 
-// xmlEscape escapes content for use as text inside an SVG element.
 func xmlEscape(s string) string {
 	var b bytes.Buffer
 	_ = xml.EscapeText(&b, []byte(s))
 	return b.String()
 }
 
-// xmlEscapeAttr escapes content for use as an attribute value. SVG colors
-// are short hex strings and so almost never need this, but using it
-// consistently for every attribute keeps us safe if someone ever feeds an
-// untrusted color string through.
 func xmlEscapeAttr(s string) string {
 	s = xmlEscape(s)
+	// xml.EscapeText leaves double quotes intact; an attribute value must escape them.
 	s = strings.ReplaceAll(s, `"`, `&quot;`)
 	return s
 }

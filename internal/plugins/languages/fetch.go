@@ -9,16 +9,9 @@ import (
 	"github.com/twangodev/gmetrics/internal/plugin"
 )
 
-// repoLangsQuery walks the user's repositories one page at a time, picking
-// up just the per-repository languages aggregate the v3+v4 API surfaces:
-// GitHub pre-computes byte counts via Linguist server-side and exposes them
-// through this edge. That makes the non-indepth path very cheap — typically
-// one GraphQL hop per `first: batch` repos, walking pageInfo until exhausted.
-//
-// The languages edge can itself paginate (a repo with >100 languages) but
-// that's rare in practice; we fetch the first 50 per repo and don't paginate
-// inside repos. If a repo somehow has more, the long tail just doesn't show
-// up in the legend, which is fine because we cap to Limit anyway.
+// Bounds repository pagination against a backend that never clears HasNextPage.
+const maxPaginationHops = 1000
+
 type repoLangsQuery struct {
 	User struct {
 		Repositories struct {
@@ -43,9 +36,6 @@ type repoLangsQuery struct {
 	} `graphql:"user(login: $login)"`
 }
 
-// fetchGraphQL walks the user's repositories, accumulates language byte
-// counts (and the per-language color the GraphQL API returned), filters
-// cfg.Ignored, sorts by Bytes desc, caps to cfg.Limit, computes Percent.
 func fetchGraphQL(ctx context.Context, env *plugin.Env, cfg Config) (Data, error) {
 	if env.GraphQL == nil {
 		return Data{}, fmt.Errorf("languages: fetch: env.GraphQL is nil")
@@ -70,12 +60,9 @@ func fetchGraphQL(ctx context.Context, env *plugin.Env, cfg Config) (Data, error
 		"affiliations": affiliations,
 	}
 
-	// pageGuard caps the number of GraphQL hops we'll make in case GitHub
-	// reports HasNextPage indefinitely (it won't, but defense in depth
-	// keeps a misbehaving mock from looping forever in tests).
-	pageGuard := 1000
-	for pageGuard > 0 {
-		pageGuard--
+	remainingHops := maxPaginationHops
+	for remainingHops > 0 {
+		remainingHops--
 		var q repoLangsQuery
 		if err := env.GraphQL.Query(ctx, &q, vars); err != nil {
 			return Data{}, fmt.Errorf("languages: fetch graphql: %w", err)
@@ -103,9 +90,6 @@ func fetchGraphQL(ctx context.Context, env *plugin.Env, cfg Config) (Data, error
 	return assemble(cfg, bytes, colors, false), nil
 }
 
-// assemble takes the raw byte map (from either path), applies the ignored
-// filter, sorts desc by bytes, caps to Limit (optionally rolling the tail
-// into "Other"), computes percentages, and returns a fully-populated Data.
 func assemble(cfg Config, bytes map[string]int, colors map[string]string, indepth bool) Data {
 	type pair struct {
 		name string
@@ -118,9 +102,7 @@ func assemble(cfg Config, bytes map[string]int, colors map[string]string, indept
 		}
 		pairs = append(pairs, pair{name, n})
 	}
-	// Stable sort: by descending bytes, then ascending name for determinism
-	// when two languages tie (which happens routinely in synthesised test
-	// data — e.g. two repos each contributing 1000 bytes of distinct langs).
+	// Name tiebreak keeps ordering deterministic when byte counts are equal.
 	sort.SliceStable(pairs, func(i, j int) bool {
 		if pairs[i].n != pairs[j].n {
 			return pairs[i].n > pairs[j].n
@@ -145,12 +127,11 @@ func assemble(cfg Config, bytes map[string]int, colors map[string]string, indept
 	}
 
 	if cfg.Other && tail > 0 {
-		// Drop the smallest of the kept set so we still fit within limit
-		// once "Other" is appended (matches upstream's behavior).
-		if len(kept) == limit && len(kept) > 0 {
-			rolled := kept[len(kept)-1].n
+		keptIsFull := len(kept) == limit && len(kept) > 0
+		if keptIsFull {
+			smallestKept := kept[len(kept)-1].n
 			kept = kept[:len(kept)-1]
-			tail += rolled
+			tail += smallestKept
 		}
 		kept = append(kept, pair{name: "Other", n: tail})
 	}
@@ -192,10 +173,6 @@ func assemble(cfg Config, bytes map[string]int, colors map[string]string, indept
 	}
 }
 
-// repoAffiliationsToEnum converts the human-readable affiliation strings
-// ("owner", "collaborator", "organization_member") to the githubv4 enum
-// values the GraphQL schema expects. Unknown values are dropped silently —
-// the validator in config.go is responsible for catching them earlier.
 func repoAffiliationsToEnum(in []string) []githubv4.RepositoryAffiliation {
 	if len(in) == 0 {
 		return []githubv4.RepositoryAffiliation{githubv4.RepositoryAffiliationOwner}

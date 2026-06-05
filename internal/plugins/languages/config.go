@@ -2,57 +2,20 @@ package languages
 
 import "fmt"
 
-// Config is the typed configuration for the languages plugin. It mirrors the
-// in-scope subset of upstream's languages plugin: sections is single-valued
-// at "most-used" for v1, details is at most a single entry "percentage", and
-// the optional Indepth flag toggles between the cheap GraphQL aggregate path
-// and the expensive go-git + go-enry walk.
 type Config struct {
-	// Sections is the ordered list of subsections to render. v1 supports
-	// only "most-used"; "recently-used" is intentionally out of scope.
-	Sections []string `koanf:"sections"`
-	// Details is the ordered list of per-language detail fields shown in
-	// the legend. v1 supports only "percentage".
-	Details []string `koanf:"details"`
-	// Ignored is a case-insensitive list of language names to drop from the
-	// aggregate before sorting (e.g. ["markdown"]).
-	Ignored []string `koanf:"ignored"`
-	// Limit caps the number of legend rows. Excess languages are either
-	// dropped (Other=false) or rolled up into an "Other" bucket.
-	Limit int `koanf:"limit"`
-	// Other, when true, rolls excess languages into an "Other" bucket at
-	// the end of the legend.
-	Other bool `koanf:"other"`
-	// Indepth, when true, switches the fetch path from the GraphQL
-	// aggregate (GitHub's pre-computed totals) to per-repo shallow clone +
-	// go-enry walk. Expensive: minutes of runtime and bandwidth scaling
-	// with repo count.
-	Indepth bool `koanf:"indepth"`
-	// RepoBatch is the per-page GraphQL page size when walking the user's
-	// repositories. Defaults to 50.
-	RepoBatch int `koanf:"repo_batch"`
-	// RepoAffiliations is the list of ownership affiliations to include
-	// (upstream's base.repositories.affiliations). Each value is one of
-	// "owner", "collaborator", "organization_member". Defaults to
-	// ["owner"].
+	Sections         []string `koanf:"sections"`
+	Details          []string `koanf:"details"`
+	Ignored          []string `koanf:"ignored"`
+	Limit            int      `koanf:"limit"`
+	Other            bool     `koanf:"other"`
+	Indepth          bool     `koanf:"indepth"`
+	RepoBatch        int      `koanf:"repo_batch"`
 	RepoAffiliations []string `koanf:"repo_affiliations"`
-	// CommitsAuthoring is the list of author-identity patterns that
-	// identify commits authored by the target user. Mirrors upstream's
-	// base.commits_authoring. Each entry is one of:
-	//   - ".user.login" → the user's GitHub login (matched against
-	//     Author.Name plus the two noreply-email forms);
-	//   - a literal email address (matched against Author.Email,
-	//     case-insensitive);
-	//   - a literal login (matched against Author.Name, case-insensitive).
-	// Only consulted by the indepth path; the GraphQL path uses GitHub's
-	// pre-computed per-repo aggregates which already reflect ownership.
+	// CommitsAuthoring is consulted only by the indepth path; the GraphQL path relies on GitHub's per-repo aggregates.
 	CommitsAuthoring []string `koanf:"commits_authoring"`
 	IndepthCachePath string   `koanf:"indepth_cache"`
 }
 
-// defaultConfig returns the documented defaults for the languages plugin so
-// callers that construct a Plugin directly (e.g. tests, the engine when no
-// config block was supplied) get sensible behavior.
 func defaultConfig() Config {
 	return Config{
 		Sections:         []string{"most-used"},
@@ -66,8 +29,6 @@ func defaultConfig() Config {
 	}
 }
 
-// validate enforces the v1 invariants on a Config. It returns an error
-// describing the first issue found, suitable for surfacing to the user.
 func (c Config) validate() error {
 	if c.Limit <= 0 {
 		return fmt.Errorf("languages: limit must be > 0")

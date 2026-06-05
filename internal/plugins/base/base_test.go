@@ -42,29 +42,22 @@ func TestRender_AllSections_NonEmpty(t *testing.T) {
 	require.Greater(t, frag.Height, 200)
 	require.Contains(t, frag.Body, "<path")
 	require.Contains(t, frag.Body, "<g class=\"plugin-base\">")
-	// Sanity: the text-to-path conversion should produce many path elements,
-	// not just one or two. A single character roughly emits one closed path;
-	// the smoke test below assumes header + 12 stat rows generate at least
-	// 20 path elements.
-	require.GreaterOrEqual(t, strings.Count(frag.Body, "<path"), 20)
+	// Header plus 12 stat rows convert to text-as-path glyphs; far more than this floor.
+	const minGlyphPaths = 20
+	require.GreaterOrEqual(t, strings.Count(frag.Body, "<path"), minGlyphPaths)
 }
 
-// TestFetch_EmptySections_SkipsGraphQL verifies base short-circuits before
-// any GraphQL work when no sections are configured (base: ”). It passes a
-// nil GraphQL client — which Fetch would otherwise reject — to prove the
-// query is never attempted, so a plugins-only card runs with no GitHub token.
 func TestFetch_EmptySections_SkipsGraphQL(t *testing.T) {
 	t.Parallel()
 
-	env := &plugin.Env{Login: "alice"} // GraphQL deliberately nil
-	data, err := Fetch(context.Background(), env, Config{})
+	// Nil GraphQL client: Fetch would reject it if it ever attempted a query.
+	envWithoutGraphQL := &plugin.Env{Login: "alice"}
+	data, err := Fetch(context.Background(), envWithoutGraphQL, Config{})
 	require.NoError(t, err)
 	require.Empty(t, data.Sections)
 	require.Equal(t, plugin.UserContext{}, data.User, "no user should be fetched")
 }
 
-// TestRender_NoSections_EmptyFragment verifies base renders an empty-bodied
-// fragment for an empty section list so the engine can omit it.
 func TestRender_NoSections_EmptyFragment(t *testing.T) {
 	t.Parallel()
 
@@ -77,9 +70,7 @@ func TestRender_NoSections_EmptyFragment(t *testing.T) {
 func TestFetch_PopulatesUser(t *testing.T) {
 	t.Parallel()
 
-	// A canned GraphQL response whose field shape matches the baseQuery
-	// struct's serialization. Numeric counts deliberately differ between
-	// sections so a mis-mapping shows up as a wrong field value.
+	// Counts differ per section so a field mis-mapping surfaces as a wrong value.
 	const respBody = `{
   "data": {
     "user": {
@@ -168,18 +159,15 @@ func TestFetch_PopulatesUser(t *testing.T) {
 	require.NotEmpty(t, data.Metadata.GeneratedAt)
 }
 
-// TestFetch_Hireable_TracksGitHub verifies the base_hireable input is a
-// tracking switch, not a force-on switch: when enabled, the badge reflects
-// the account's live GitHub "Available for hire" status; when disabled, the
-// badge never shows regardless of GitHub.
+// base_hireable tracks GitHub's live "Available for hire" status; it never forces the badge on.
 func TestFetch_Hireable_TracksGitHub(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name      string
-		track     bool // cfg.Hireable
-		github    bool // GitHub's isHireable
-		wantBadge bool
+		name           string
+		trackHireable  bool
+		githubHireable bool
+		wantBadge      bool
 	}{
 		{"track-and-github-hireable", true, true, true},
 		{"track-but-github-not-hireable", true, false, false},
@@ -199,7 +187,7 @@ func TestFetch_Hireable_TracksGitHub(t *testing.T) {
       "contributionsCollection": {"contributionCalendar": {"weeks": []}}
     }
   }
-}`, tc.github)
+}`, tc.githubHireable)
 
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
@@ -215,8 +203,8 @@ func TestFetch_Hireable_TracksGitHub(t *testing.T) {
 
 			env := &plugin.Env{Login: "alice", REST: clients.REST, GraphQL: clients.GraphQL}
 			cfg := defaultConfig()
-			cfg.Repos.Max = 0 // skip the repo-stats pagination; not under test
-			cfg.Hireable = tc.track
+			cfg.Repos.Max = 0 // skip repo-stats pagination; not under test
+			cfg.Hireable = tc.trackHireable
 
 			data, err := Fetch(context.Background(), env, cfg)
 			require.NoError(t, err)
@@ -256,14 +244,11 @@ func TestBuildCommitSearchQuery(t *testing.T) {
 func TestPopulateAuthoredCommitCount_SumsAndReplaces(t *testing.T) {
 	t.Parallel()
 
-	// Stub server: returns total_count keyed off the q= query string.
-	// Tracks the queries it received so we can assert each pattern was
-	// translated correctly.
 	var (
-		mu      sync.Mutex
-		queries []string
+		mu              sync.Mutex
+		receivedQueries []string
 	)
-	totals := map[string]int{
+	totalsByQuery := map[string]int{
 		"author:alice": 100,
 		"author-email:12+alice@users.noreply.github.com": 200,
 		"author-email:james@fish.audio":                  300,
@@ -272,10 +257,10 @@ func TestPopulateAuthoredCommitCount_SumsAndReplaces(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query().Get("q")
 		mu.Lock()
-		queries = append(queries, q)
+		receivedQueries = append(receivedQueries, q)
 		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"total_count": %d, "incomplete_results": false, "items": []}`, totals[q])
+		fmt.Fprintf(w, `{"total_count": %d, "incomplete_results": false, "items": []}`, totalsByQuery[q])
 	}))
 	t.Cleanup(srv.Close)
 
@@ -301,18 +286,16 @@ func TestPopulateAuthoredCommitCount_SumsAndReplaces(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	require.Len(t, queries, 3)
-	// Each query string is URL-decoded by net/url; assert the three expected forms.
-	want := map[string]bool{
+	require.Len(t, receivedQueries, 3)
+	wantQueries := map[string]bool{
 		"author:alice": true,
 		"author-email:12+alice@users.noreply.github.com": true,
 		"author-email:james@fish.audio":                  true,
 	}
-	for _, q := range queries {
-		// net/url decodes "+" to space (form encoding). Restore the
-		// literal "+" so the noreply-email query compares equal.
+	for _, q := range receivedQueries {
+		// net/url form-decodes "+" to space; restore it before comparing.
 		q = strings.ReplaceAll(q, " ", "+")
-		require.True(t, want[q], "unexpected query: %q", q)
+		require.True(t, wantQueries[q], "unexpected query: %q", q)
 	}
 }
 
@@ -345,12 +328,12 @@ func TestPopulateAuthoredCommitCount_CapsPatterns(t *testing.T) {
 	t.Parallel()
 
 	var (
-		mu    sync.Mutex
-		callN int
+		mu        sync.Mutex
+		callCount int
 	)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		mu.Lock()
-		callN++
+		callCount++
 		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"total_count": 1, "incomplete_results": false, "items": []}`))
@@ -365,18 +348,18 @@ func TestPopulateAuthoredCommitCount_CapsPatterns(t *testing.T) {
 
 	env := &plugin.Env{Login: "alice", REST: clients.REST}
 	cfg := defaultConfig()
-	// Seven patterns; cap is 5.
 	cfg.CommitsAuthoring = []string{
 		"a@example.com", "b@example.com", "c@example.com",
 		"d@example.com", "e@example.com", "f@example.com",
 		"g@example.com",
 	}
+	require.Greater(t, len(cfg.CommitsAuthoring), maxAuthoringPatterns)
 
 	d := Data{}
 	require.NoError(t, populateAuthoredCommitCount(context.Background(), env, cfg, "alice", &d))
 
 	mu.Lock()
 	defer mu.Unlock()
-	require.Equal(t, maxAuthoringPatterns, callN)
+	require.Equal(t, maxAuthoringPatterns, callCount)
 	require.Equal(t, maxAuthoringPatterns, d.Activity.AuthoredCommits)
 }

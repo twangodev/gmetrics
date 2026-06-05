@@ -2,38 +2,21 @@ package wakatime
 
 import "fmt"
 
-// Config is the typed configuration for the wakatime plugin.
 type Config struct {
-	// Token is the WakaTime API key (https://wakatime.com/api-key).
-	Token string
-	// URL is the WakaTime base URL. Defaults to "https://wakatime.com".
-	URL string
-	// User is the WakaTime user identifier. Defaults to "current", which the
-	// API resolves to the token's owner.
-	User string
-	// Days controls the lookback range. Mapped to API ranges:
-	//   7 -> last_7_days
-	//   30 -> last_30_days
-	//   180 -> last_6_months
-	//   365 -> last_year
-	// Other values fall back to last_7_days.
-	Days int
-	// Sections is the ordered list of sections to render. Recognized values
-	// include "time", "projects", "languages", "editors", "os" and the same
-	// names with a "-graphs" suffix for the bar-chart variants.
+	Token    string
+	URL      string
+	User     string
+	Days     int
 	Sections []string
-	// Limit is the maximum number of rows per graph/category. Defaults to 5.
-	Limit int
+	Limit    int
 }
 
-// defaultConfig returns the baseline configuration used when none is supplied
-// or as the starting point for decoding from YAML.
 func defaultConfig() Config {
 	return Config{
-		URL:      "https://wakatime.com",
-		User:     "current",
-		Days:     7,
-		Limit:    5,
+		URL:   "https://wakatime.com",
+		User:  "current", // WakaTime resolves "current" to the token's owner.
+		Days:  7,
+		Limit: 5,
 		Sections: []string{
 			"time", "projects", "languages", "editors", "os",
 			"projects-graphs", "languages-graphs", "editors-graphs", "os-graphs",
@@ -41,8 +24,6 @@ func defaultConfig() Config {
 	}
 }
 
-// decodeConfig converts a raw YAML map into a Config, filling defaults for
-// any missing fields. Returning an empty/zero raw map yields the defaults.
 func decodeConfig(raw map[string]any) (Config, error) {
 	c := defaultConfig()
 	if raw == nil {
@@ -130,8 +111,6 @@ func decodeConfig(raw map[string]any) (Config, error) {
 	return c, nil
 }
 
-// rangeForDays maps a Days value to the WakaTime API range slug. Unknown
-// values fall back to "last_7_days" to match upstream's behavior.
 func rangeForDays(days int) string {
 	switch days {
 	case 7:

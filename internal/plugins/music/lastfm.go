@@ -14,22 +14,12 @@ import (
 	"github.com/twangodev/gmetrics/internal/plugin"
 )
 
-// lastfmResponse mirrors the shape of the Last.fm
-// user.getrecenttracks/format=json payload. Field names with leading "@"
-// and "#" characters are awkward in Go but legal as JSON tags; we model
-// them with explicit `json:"@attr"` / `json:"#text"` tags so the decoder
-// finds them.
 type lastfmResponse struct {
 	RecentTracks struct {
 		Track []lastfmTrack `json:"track"`
 	} `json:"recenttracks"`
 }
 
-// lastfmTrack is one entry inside recenttracks.track. The Last.fm API
-// returns artist as an object with a "#text" field (the artist name) and
-// date as an object whose "uts" is the play timestamp as a Unix-seconds
-// string. The optional "@attr" object only appears when the track is
-// currently playing.
 type lastfmTrack struct {
 	Name   string `json:"name"`
 	Artist struct {
@@ -44,20 +34,11 @@ type lastfmTrack struct {
 	} `json:"@attr"`
 }
 
-// lastfmImage is one entry in track.image. Size is the canonical Last.fm
-// label ("small", "medium", "large", "extralarge", "mega"); the URL is
-// nested under the "#text" key.
 type lastfmImage struct {
 	Text string `json:"#text"`
 	Size string `json:"size"`
 }
 
-// fetchLastfm issues a single GET against the user.getrecenttracks Last.fm
-// endpoint, decodes the response, and assembles a Data value. Avatars
-// (artwork) are fetched only when env.HTTP is non-nil and the largest
-// image URL is non-empty; any artwork fetch failure is logged and the
-// track is kept with an empty ArtworkB64 so the rest of the card still
-// renders. Tests pass env.HTTP == nil to skip the artwork step.
 func fetchLastfm(ctx context.Context, env *plugin.Env, cfg Config) (Data, error) {
 	base := cfg.URL
 	if base == "" {
@@ -72,9 +53,6 @@ func fetchLastfm(ctx context.Context, env *plugin.Env, cfg Config) (Data, error)
 	if err != nil {
 		return Data{}, fmt.Errorf("music: new request: %w", err)
 	}
-	// Match upstream's UA so Last.fm doesn't shadowban a misconfigured
-	// client. The Accept header is explicit so the server doesn't fall
-	// back to XML in some edge cases.
 	req.Header.Set("User-Agent", "gmetrics")
 	req.Header.Set("Accept", "application/json")
 
@@ -97,9 +75,7 @@ func fetchLastfm(ctx context.Context, env *plugin.Env, cfg Config) (Data, error)
 		return Data{}, fmt.Errorf("music: decode lastfm response: %w", err)
 	}
 
-	// Last.fm prepends the currently-playing track to the response on top
-	// of the requested limit (so `limit=8` yields 9 entries while a track
-	// is playing). Cap the slice so the rendered grid stays balanced.
+	// Last.fm prepends the now-playing track on top of limit, so limit=8 can return 9.
 	tracks := parsed.RecentTracks.Track
 	if cfg.Limit > 0 && len(tracks) > cfg.Limit {
 		tracks = tracks[:cfg.Limit]
@@ -129,9 +105,6 @@ func fetchLastfm(ctx context.Context, env *plugin.Env, cfg Config) (Data, error)
 	return data, nil
 }
 
-// buildLastfmURL combines the (possibly overridden) base URL with the
-// fixed user.getrecenttracks query parameters. We use net/url so user
-// names and tokens with reserved characters are percent-encoded correctly.
 func buildLastfmURL(base string, cfg Config) (string, error) {
 	u, err := url.Parse(base)
 	if err != nil {
@@ -149,15 +122,14 @@ func buildLastfmURL(base string, cfg Config) (string, error) {
 	return u.String(), nil
 }
 
-// formatPlayedAt converts the per-track timestamp data into the
-// pre-formatted display string Render expects. The Last.fm API uses two
-// shapes: "@attr": {"nowplaying": "true"} for the currently playing
-// track, and "date": {"uts": "1700000000"} for everything else. When
-// neither is present the function returns an empty string and Render
-// elides the played-at line.
+const (
+	nowPlayingLabel = "now playing"
+	playedAtLayout  = "2006-01-02 15:04 UTC"
+)
+
 func formatPlayedAt(t lastfmTrack) string {
 	if t.Attr.NowPlaying == "true" {
-		return "now playing"
+		return nowPlayingLabel
 	}
 	if t.Date.UTS == "" {
 		return ""
@@ -166,14 +138,10 @@ func formatPlayedAt(t lastfmTrack) string {
 	if err != nil {
 		return ""
 	}
-	return time.Unix(secs, 0).UTC().Format("2006-01-02 15:04 UTC")
+	return time.Unix(secs, 0).UTC().Format(playedAtLayout)
 }
 
-// largestImageURL picks the highest-resolution artwork URL Last.fm
-// returned. The API orders images small -> medium -> large -> extralarge
-// -> mega, so we iterate from the end and return the first non-empty
-// "#text" value. Some tracks have empty URLs across all sizes; that
-// returns "" and Render falls back to a placeholder rectangle.
+// Last.fm orders images small -> mega, so the last non-empty URL is the largest.
 func largestImageURL(images []lastfmImage) string {
 	for i := len(images) - 1; i >= 0; i-- {
 		if images[i].Text != "" {

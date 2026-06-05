@@ -11,12 +11,11 @@ import (
 	"golang.org/x/oauth2"
 )
 
-// Config configures construction of GitHub REST + GraphQL clients.
 type Config struct {
-	Token          string       // required
-	RESTBaseURL    string       // override for tests/enterprise (must end with "/")
-	GraphQLBaseURL string       // override for tests/enterprise (full URL, e.g. ".../graphql")
-	HTTPClient     *http.Client // optional underlying transport (will have OAuth wrapped over it)
+	Token          string
+	RESTBaseURL    string       // must end with "/"
+	GraphQLBaseURL string       // full URL, e.g. ".../graphql"
+	HTTPClient     *http.Client // wrapped with OAuth; nil uses the default transport
 }
 
 type Clients struct {

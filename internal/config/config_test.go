@@ -40,7 +40,6 @@ func TestLoad_DefaultsApply(t *testing.T) {
 	require.Equal(t, []string{"header", "activity", "community", "repositories", "metadata"}, cfg.Base.Sections)
 	require.Equal(t, 8, cfg.Plugins.Languages.Limit)
 	require.Equal(t, "none", cfg.Output.Action)
-	// Spot-check more defaults.
 	require.Equal(t, 100, cfg.Base.Repositories.Max)
 	require.Equal(t, []string{"owner"}, cfg.Base.Repositories.Affiliations)
 	require.Equal(t, 24, cfg.Plugins.People.Limit)
@@ -105,7 +104,6 @@ func TestLoadCombined_EnvOverridesFile(t *testing.T) {
 	cfg, err := config.LoadCombined(path, os.Environ())
 	require.NoError(t, err)
 	require.Equal(t, "bob", cfg.User)
-	// File-provided value still applies when env did not set it.
 	require.Equal(t, "card.svg", cfg.Filename)
 }
 

@@ -1,20 +1,4 @@
-// Package languages implements the gmetrics "languages" plugin. It produces
-// the "Most used languages" stacked bar plus per-language legend that
-// upstream's languages plugin renders in the classic template.
-//
-// v1 scope deliberately covers the user's actual workflow inputs:
-//
-//   - sections: [most-used]   (recently-used is out of scope)
-//   - details:  [percentage]  (lines, bytes-size are out of scope)
-//   - ignored:  [markdown]    (case-insensitive language name list)
-//   - other:    false         (no "Other" bucket roll-up)
-//   - limit:    8             (cap on legend rows)
-//
-// Plus the upstream-equivalent "indepth" toggle which, when true, switches
-// from the cheap GraphQL aggregate (sizes returned by GitHub's Linguist
-// pre-computed totals) to a per-repo shallow clone + go-enry walk. The
-// indepth path is more expensive but produces byte totals computed from the
-// user's actual code rather than GitHub's repository-wide totals.
+// Package languages renders the most-used languages stacked bar and legend.
 package languages
 
 import (
@@ -28,14 +12,10 @@ func init() {
 	plugin.Register("languages", func() plugin.Plugin { return &Plugin{} })
 }
 
-// Plugin is the gmetrics languages plugin implementation.
 type Plugin struct{}
 
-// Name returns the plugin's stable identifier.
 func (*Plugin) Name() string { return "languages" }
 
-// DecodeConfig parses the raw map produced by the YAML/env config loader
-// into a typed Config. Missing keys fall back to defaultConfig().
 func (*Plugin) DecodeConfig(raw map[string]any) (any, error) {
 	cfg := defaultConfig()
 	if raw == nil {
@@ -103,8 +83,6 @@ func (*Plugin) DecodeConfig(raw map[string]any) (any, error) {
 	return cfg, nil
 }
 
-// Fetch dispatches to the cheap GraphQL aggregate or the indepth clone+enry
-// walk depending on cfg.Indepth.
 func (*Plugin) Fetch(ctx context.Context, env *plugin.Env, raw any) (any, error) {
 	cfg, ok := raw.(Config)
 	if !ok {
@@ -122,7 +100,6 @@ func (*Plugin) Fetch(ctx context.Context, env *plugin.Env, raw any) (any, error)
 	return fetchGraphQL(ctx, env, cfg)
 }
 
-// Render is implemented in render.go.
 func (*Plugin) Render(env *plugin.Env, raw any) (plugin.Fragment, error) {
 	data, ok := raw.(Data)
 	if !ok {
@@ -131,9 +108,6 @@ func (*Plugin) Render(env *plugin.Env, raw any) (plugin.Fragment, error) {
 	return renderFragment(env, data)
 }
 
-// toStringSlice accepts []string, []any (each entry stringable), or a single
-// string (treated as a 1-element list). Matches the shape the YAML/env
-// decoder may produce for a list-of-strings field.
 func toStringSlice(v any) ([]string, error) {
 	switch s := v.(type) {
 	case []string:
@@ -155,8 +129,7 @@ func toStringSlice(v any) ([]string, error) {
 	}
 }
 
-// toInt accepts int, int64, or float64 (YAML often decodes integers as
-// float64 via interface{}) and returns the corresponding int.
+// float64 case: YAML decodes integers as float64 through interface{}.
 func toInt(v any) (int, error) {
 	switch n := v.(type) {
 	case int:
@@ -170,8 +143,6 @@ func toInt(v any) (int, error) {
 	}
 }
 
-// toBool accepts bool or the common stringy forms (true/false/yes/no/on/off
-// /1/0) and returns the corresponding bool.
 func toBool(v any) (bool, error) {
 	switch b := v.(type) {
 	case bool:

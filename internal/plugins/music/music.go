@@ -1,9 +1,4 @@
-// Package music implements the gmetrics "music" plugin. The v1 scope is
-// deliberately narrow: the only supported provider is Last.fm and the only
-// supported mode is "recent" (recently played tracks). Other providers from
-// upstream (Spotify, YouTube Music, Apple Music) and other modes (playlist,
-// top) are out of scope; calling Fetch with a non-lastfm provider returns
-// an error.
+// Package music implements the gmetrics "music" plugin (Last.fm, recent tracks).
 package music
 
 import (
@@ -16,14 +11,10 @@ func init() {
 	plugin.Register("music", func() plugin.Plugin { return &Plugin{} })
 }
 
-// Plugin is the gmetrics music plugin implementation.
 type Plugin struct{}
 
-// Name returns the plugin's stable identifier.
 func (*Plugin) Name() string { return "music" }
 
-// DecodeConfig parses the raw map produced by the YAML/env config loader
-// into a typed Config. Missing keys fall back to defaultConfig() values.
 func (*Plugin) DecodeConfig(raw map[string]any) (any, error) {
 	cfg := defaultConfig()
 	if raw == nil {
@@ -74,7 +65,6 @@ func (*Plugin) DecodeConfig(raw map[string]any) (any, error) {
 	return cfg, nil
 }
 
-// toString coerces a few common YAML-decoded scalar shapes into a string.
 func toString(v any) (string, error) {
 	switch s := v.(type) {
 	case string:
@@ -84,8 +74,7 @@ func toString(v any) (string, error) {
 	}
 }
 
-// toInt accepts int, int64, or float64 (YAML often decodes integers as
-// float64 via interface{}) and returns the corresponding int.
+// YAML decodes integers as float64 through any, so accept all numeric shapes.
 func toInt(v any) (int, error) {
 	switch n := v.(type) {
 	case int:

@@ -1,6 +1,7 @@
 package render_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -11,17 +12,20 @@ import (
 )
 
 func TestCompose_BasicStackedFragments(t *testing.T) {
+	const padTop, padGap, padBot = 16, 12, 16
+	const firstHeight, secondHeight = 50, 30
+	expectedHeight := padTop + firstHeight + padGap + secondHeight + padBot
+
 	fr := render.NewFramer(render.Options{Width: 480})
 	out, err := fr.Compose([]plugin.Fragment{
-		{Body: `<rect width="200" height="50"/>`, Width: 200, Height: 50},
-		{Body: `<rect width="200" height="30"/>`, Width: 200, Height: 30},
+		{Body: `<rect width="200" height="50"/>`, Width: 200, Height: firstHeight},
+		{Body: `<rect width="200" height="30"/>`, Width: 200, Height: secondHeight},
 	})
 	require.NoError(t, err)
 	require.Contains(t, out, `width="480"`)
 	require.Contains(t, out, "<style>")
 	require.Contains(t, out, `viewBox="0 0 480`)
-	// total = padTop(16) + 50 + gap(12) + 30 + padBot(16) = 124
-	require.Contains(t, out, `height="124"`)
+	require.Contains(t, out, fmt.Sprintf(`height="%d"`, expectedHeight))
 }
 
 func TestCompose_EmptyFragments(t *testing.T) {

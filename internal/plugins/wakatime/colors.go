@@ -9,28 +9,14 @@ import (
 	languagespkg "github.com/twangodev/gmetrics/internal/plugins/languages"
 )
 
-// editorColors maps WakaTime editor identifiers to canonical brand colors.
-// Keys are matched case-insensitively. Provenance per category:
-//
-//   - JetBrains IDEs (IntelliJ, PyCharm, WebStorm, GoLand, etc.) — pulled
-//     from the official github.com/JetBrains/logos SVGs (dominant gradient
-//     stop, since the marketing logo is a multi-stop cube and Simple Icons
-//     collapses them all to #000 wordmark).
-//   - VS Code, Visual Studio — code.visualstudio.com/brand and Microsoft
-//     brand guidelines; not in Simple Icons (MS trademark policy).
-//   - Most others — Simple Icons (simpleicons.org), the de-facto registry
-//     of brand-registered hex codes.
-//   - Atom, Brackets — Wikimedia Commons SVGs (no longer in Simple Icons).
-//   - Claude Code — Anthropic's Claude brand "Crail" orange.
-//   - BBEdit / Nova / TextMate — no published brand kit; sampled from the
-//     macOS app icon. Replace if a vendor source surfaces.
+// editorColors keys are lowercased; callers must ToLower before lookup.
+// Provenance: JetBrains uses the dominant gradient stop; Microsoft editors come from brand
+// kits (absent from Simple Icons); BBEdit/Nova/TextMate are sampled from the app icon — replace if a vendor source surfaces.
 var editorColors = map[string]string{
-	// Microsoft
 	"vs code":       "#0098ff",
 	"vscode":        "#0098ff",
 	"visual studio": "#5c2d91",
 
-	// JetBrains family (dominant gradient stops)
 	"intellij idea": "#fe2857",
 	"intellij":      "#fe2857",
 	"pycharm":       "#00d886",
@@ -48,13 +34,11 @@ var editorColors = map[string]string{
 	"fleet":         "#0500ff",
 	"mps":           "#21d789",
 
-	// AI-first editors
 	"claude code": "#d97757",
 	"cursor":      "#000000",
 	"zed":         "#084ccf",
 	"windsurf":    "#0b100f",
 
-	// Classic editors
 	"sublime text": "#ff9800",
 	"atom":         "#66595c",
 	"vim":          "#019733",
@@ -67,15 +51,13 @@ var editorColors = map[string]string{
 	"eclipse":      "#2c2255",
 	"nova":         "#1e3148",
 
-	// Mobile / native
 	"android studio": "#3ddc84",
 	"xcode":          "#147efb",
 
-	// Sentinel for WakaTime's "name unset" bin
 	"unknown editor": "#9aa0a6",
 }
 
-// osColors maps WakaTime OS identifiers to common brand colors.
+// osColors keys are lowercased; callers must ToLower before lookup.
 var osColors = map[string]string{
 	"linux":     "#fcc624",
 	"mac":       "#a2aaad",
@@ -90,11 +72,6 @@ var osColors = map[string]string{
 	"unknown":   "#9aa0a6",
 }
 
-// barColorFor returns the bar color for one row in the named category.
-// Language rows route through the languages plugin's Linguist resolver;
-// editor / OS rows look up curated brand colors; project rows hash to a
-// stable HSL hue so each project gets a distinct-but-deterministic color.
-// Anything unresolved falls back to a palette cycle on i.
 func barColorFor(category, name string, i int) color.RGBA {
 	switch category {
 	case "languages":
@@ -121,17 +98,18 @@ func barColorFor(category, name string, i int) color.RGBA {
 	return barPalette[i%len(barPalette)]
 }
 
-// projectColor hashes a project name to a stable HSL hue and returns the
-// RGBA. Saturation and lightness are fixed so colors stay visually balanced
-// against the muted card background regardless of the hue.
+const (
+	projectSaturation = 0.55
+	projectLightness  = 0.55
+)
+
 func projectColor(name string) color.RGBA {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(strings.ToLower(name)))
 	hue := float64(h.Sum32()%360) / 360.0
-	return hslToRGBA(hue, 0.55, 0.55)
+	return hslToRGBA(hue, projectSaturation, projectLightness)
 }
 
-// parseHex accepts "#rrggbb" or "rrggbb" and returns the opaque RGBA.
 func parseHex(s string) (color.RGBA, bool) {
 	s = strings.TrimPrefix(s, "#")
 	if len(s) != 6 {
@@ -161,8 +139,7 @@ func hexNibble(c byte) (uint8, bool) {
 	return 0, false
 }
 
-// hslToRGBA converts HSL in [0,1] to opaque RGBA, using the standard
-// formula (https://www.w3.org/TR/css-color-3/#hsl-color).
+// hslToRGBA: h, s, l in [0,1] per https://www.w3.org/TR/css-color-3/#hsl-color.
 func hslToRGBA(h, s, l float64) color.RGBA {
 	if s == 0 {
 		v := uint8(math.Round(l * 255))

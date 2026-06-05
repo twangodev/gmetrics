@@ -16,9 +16,6 @@ import (
 	"github.com/twangodev/gmetrics/internal/plugins/base"
 )
 
-// fakePlugin lets a test stub a registered plugin without touching the network.
-// Fetch/Render can return canned values or errors, and the Render hook receives
-// whatever Fetch produced (so tests can chain through Data).
 type fakePlugin struct {
 	name     string
 	fetch    func(ctx context.Context, env *plugin.Env, cfg any) (any, error)
@@ -34,9 +31,6 @@ func (f fakePlugin) Render(env *plugin.Env, data any) (plugin.Fragment, error) {
 	return f.renderFn(env, data)
 }
 
-// registerFake replaces (or installs) a plugin under the given name.
-// plugin.Register overwrites by name, so test setup can safely shadow the
-// real plugins that registered themselves in init().
 func registerFake(name string, fp fakePlugin) {
 	fp.name = name
 	plugin.Register(name, func() plugin.Plugin { return fp })
@@ -52,7 +46,7 @@ func newTestEnv() *plugin.Env {
 func TestEngine_RunsBaseFirstThenOthers(t *testing.T) {
 	registerFake("base", fakePlugin{
 		fetch: func(ctx context.Context, env *plugin.Env, cfg any) (any, error) {
-			// Return a real base.Data so the engine's type assertion succeeds.
+			// Must be base.Data: the engine type-asserts it to populate Env.User.
 			return base.Data{
 				User: plugin.UserContext{Login: "octocat", Name: "The Octocat"},
 			}, nil
@@ -63,7 +57,6 @@ func TestEngine_RunsBaseFirstThenOthers(t *testing.T) {
 	})
 	registerFake("languages", fakePlugin{
 		fetch: func(ctx context.Context, env *plugin.Env, cfg any) (any, error) {
-			// Sanity check: env.User should be populated by the engine after base.
 			require.Equal(t, "octocat", env.User.Login, "languages.Fetch should see Env.User populated by base")
 			return "lang-marker", nil
 		},
@@ -115,7 +108,6 @@ func TestEngine_NonStrict_SubstitutesErrorFragment(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, frags, 2)
 	require.Contains(t, frags[0].Body, "id=\"base\"")
-	// Error fragment marks the failing plugin name in the body.
 	require.True(t, strings.Contains(frags[1].Body, "languages"),
 		"error fragment body should mention plugin name; got %q", frags[1].Body)
 	require.Contains(t, frags[1].Body, "plugin-error")

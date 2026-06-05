@@ -17,8 +17,6 @@ type QuotaRequirement struct {
 	Search  int
 }
 
-// CheckQuota returns the current rate-limit snapshot and an error if any
-// configured requirement is not met.
 func (c *Clients) CheckQuota(ctx context.Context, req QuotaRequirement) (Quota, error) {
 	limits, _, err := c.REST.RateLimit.Get(ctx)
 	if err != nil {

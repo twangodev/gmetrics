@@ -1,13 +1,5 @@
-// Package config defines the typed configuration tree for gmetrics and the
-// loaders that build it from YAML files, INPUT_* env vars, and compiled-in
-// defaults. The merge order (lowest to highest priority) is:
-//
-//  1. compiled-in defaults
-//  2. YAML config file
-//  3. INPUT_* env vars
-//  4. CLI flags (applied by the caller after loading)
-//
-// koanf/v2 backs the merge; go.yaml.in/yaml/v3 parses YAML.
+// Package config loads the gmetrics config, merging compiled-in defaults,
+// then a YAML file, then INPUT_* env vars (later sources win).
 package config
 
 import (
@@ -18,7 +10,6 @@ import (
 	"github.com/knadh/koanf/v2"
 )
 
-// Config is the top-level configuration object for one card render.
 type Config struct {
 	User     string        `koanf:"user"`
 	Filename string        `koanf:"filename"`
@@ -28,7 +19,6 @@ type Config struct {
 	Output   OutputConfig  `koanf:"output"`
 }
 
-// BaseConfig holds settings for the always-on `base` plugin.
 type BaseConfig struct {
 	Sections         []string  `koanf:"sections"`
 	Hireable         bool      `koanf:"hireable"`
@@ -37,7 +27,6 @@ type BaseConfig struct {
 	Repositories     RepoFetch `koanf:"repositories"`
 }
 
-// RepoFetch controls how repositories are queried for the base plugin.
 type RepoFetch struct {
 	Affiliations []string `koanf:"affiliations"`
 	Max          int      `koanf:"max"`
@@ -45,7 +34,6 @@ type RepoFetch struct {
 	Forks        bool     `koanf:"forks"`
 }
 
-// PluginsConfig groups settings for each optional plugin.
 type PluginsConfig struct {
 	Languages LanguagesConfig `koanf:"languages"`
 	People    PeopleConfig    `koanf:"people"`
@@ -54,7 +42,6 @@ type PluginsConfig struct {
 	Steam     SteamConfig     `koanf:"steam"`
 }
 
-// LanguagesConfig configures the `languages` plugin.
 type LanguagesConfig struct {
 	Enabled      bool     `koanf:"enabled"`
 	Sections     []string `koanf:"sections"`
@@ -66,7 +53,6 @@ type LanguagesConfig struct {
 	IndepthCache string   `koanf:"indepth_cache"`
 }
 
-// PeopleConfig configures the `people` plugin.
 type PeopleConfig struct {
 	Enabled bool     `koanf:"enabled"`
 	Types   []string `koanf:"types"`
@@ -74,7 +60,6 @@ type PeopleConfig struct {
 	Size    int      `koanf:"size"`
 }
 
-// WakatimeConfig configures the `wakatime` plugin.
 type WakatimeConfig struct {
 	Enabled  bool     `koanf:"enabled"`
 	Token    string   `koanf:"token"`
@@ -85,7 +70,6 @@ type WakatimeConfig struct {
 	Limit    int      `koanf:"limit"`
 }
 
-// MusicConfig configures the `music` plugin.
 type MusicConfig struct {
 	Enabled  bool   `koanf:"enabled"`
 	Provider string `koanf:"provider"`
@@ -95,7 +79,6 @@ type MusicConfig struct {
 	Limit    int    `koanf:"limit"`
 }
 
-// SteamConfig configures the `steam` plugin.
 type SteamConfig struct {
 	Enabled           bool     `koanf:"enabled"`
 	Token             string   `koanf:"token"`
@@ -105,18 +88,14 @@ type SteamConfig struct {
 	AchievementsLimit int      `koanf:"achievements_limit"`
 }
 
-// GitHubConfig holds GitHub API credentials.
 type GitHubConfig struct {
 	Token string `koanf:"token"`
 }
 
-// OutputConfig controls how the rendered SVG is delivered. Only `none`
-// (write file locally) is supported in v1.
 type OutputConfig struct {
 	Action string `koanf:"action"`
 }
 
-// defaultsYAML is the compiled-in default config layered under every load.
 const defaultsYAML = `filename: github-metrics.svg
 base:
   sections: [header, activity, community, repositories, metadata]
@@ -157,8 +136,6 @@ output:
   action: none
 `
 
-// newKoanfWithDefaults returns a koanf instance pre-loaded with the
-// compiled-in defaults.
 func newKoanfWithDefaults() (*koanf.Koanf, error) {
 	k := koanf.New(".")
 	if err := k.Load(rawbytes.Provider([]byte(defaultsYAML)), koanfyaml.Parser()); err != nil {
@@ -167,7 +144,6 @@ func newKoanfWithDefaults() (*koanf.Koanf, error) {
 	return k, nil
 }
 
-// unmarshal decodes the koanf state into a *Config.
 func unmarshal(k *koanf.Koanf) (*Config, error) {
 	var cfg Config
 	if err := k.Unmarshal("", &cfg); err != nil {
@@ -176,9 +152,6 @@ func unmarshal(k *koanf.Koanf) (*Config, error) {
 	return &cfg, nil
 }
 
-// LoadBytes parses one YAML document layered on top of the compiled-in
-// defaults and returns the resulting Config. An empty input returns the
-// defaults unchanged.
 func LoadBytes(yamlSrc []byte) (*Config, error) {
 	k, err := newKoanfWithDefaults()
 	if err != nil {
@@ -192,8 +165,6 @@ func LoadBytes(yamlSrc []byte) (*Config, error) {
 	return unmarshal(k)
 }
 
-// LoadFile reads a YAML file from disk and parses it on top of the
-// compiled-in defaults.
 func LoadFile(path string) (*Config, error) {
 	b, err := readFile(path)
 	if err != nil {
@@ -202,10 +173,7 @@ func LoadFile(path string) (*Config, error) {
 	return LoadBytes(b)
 }
 
-// LoadFromEnv builds a Config from INPUT_* env vars (no YAML file). Pass
-// the full environ slice (typically os.Environ()); unrecognised entries
-// are silently ignored, matching how GH Actions injects unrelated env
-// vars alongside the INPUT_* ones we care about.
+// Non-INPUT_* entries are ignored: GH Actions injects unrelated env vars.
 func LoadFromEnv(environ []string) (*Config, error) {
 	yamlBytes, err := envToYAML(environ)
 	if err != nil {
@@ -214,9 +182,7 @@ func LoadFromEnv(environ []string) (*Config, error) {
 	return LoadBytes(yamlBytes)
 }
 
-// LoadCombined layers env-derived YAML on top of a file (file = lower
-// priority, env = higher). If filePath is empty, behaves like
-// LoadFromEnv.
+// LoadCombined layers env-derived YAML over the file, so env wins on conflict.
 func LoadCombined(filePath string, environ []string) (*Config, error) {
 	k, err := newKoanfWithDefaults()
 	if err != nil {
@@ -245,8 +211,6 @@ func LoadCombined(filePath string, environ []string) (*Config, error) {
 	return unmarshal(k)
 }
 
-// Validate returns an error if the Config is missing required fields or
-// has values not supported in v1.
 func Validate(cfg *Config) error {
 	if cfg == nil {
 		return fmt.Errorf("config is nil")

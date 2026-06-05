@@ -15,14 +15,6 @@ import (
 
 var errInvalidData = errors.New("base: render data has unexpected type")
 
-// baseQuery is the single GraphQL query the base plugin issues against the
-// GitHub API. It fetches the user's profile, follower/following counts, the
-// repositories aggregate (filtered by ownerAffiliations), and the
-// contributions collection for the trailing year together with the
-// per-day contribution calendar.
-//
-// Repositories.OwnerAffiliations and the contribution-calendar date window
-// are bound via the variables map passed to client.Query.
 type baseQuery struct {
 	User struct {
 		Login      githubv4.String
@@ -83,18 +75,12 @@ type baseQuery struct {
 	} `graphql:"user(login: $login)"`
 }
 
-// Fetch performs the GraphQL query and assembles the plugin's Data value.
-// Failed sub-queries surface as a returned error; partial data is not
-// reported back to the engine in v1 (the engine wraps the error into an
-// ErrorFragment).
 func Fetch(ctx context.Context, env *plugin.Env, cfg Config) (Data, error) {
 	var d Data
 	d.Sections = append(d.Sections, cfg.Sections...)
 	d.Metadata.GeneratedAt = time.Now().UTC().Format(time.RFC3339)
 
-	// With no sections to render, base has nothing to draw — skip the GitHub
-	// GraphQL work entirely. This lets a plugins-only card (base: '') run with
-	// token: NOT_NEEDED instead of failing on the base query.
+	// No sections means a plugins-only card (base: '') can run with token: NOT_NEEDED.
 	if len(cfg.Sections) == 0 {
 		return d, nil
 	}
@@ -160,29 +146,18 @@ func Fetch(ctx context.Context, env *plugin.Env, cfg Config) (Data, error) {
 		Watching:  int(q.User.Watching.TotalCount),
 	}
 
+	// Packages is left zero: GraphQL does not expose it for arbitrary users (needs a read:packages REST call).
 	d.Repositories = Repositories{
 		Count: int(q.User.Repositories.TotalCount),
 		Disk:  int(q.User.Repositories.TotalDiskUsage),
-		// Packages is not exposed by GraphQL for arbitrary users (would need
-		// a REST call to /users/:login/packages with read:packages scope);
-		// leave it at zero. The remaining aggregates are populated below by
-		// paginating the repositories collection.
 	}
 
-	// Aggregate per-repo stats (Forks, Stargazers, Watchers, Releases,
-	// License) by walking the user's repositories. A failure here is
-	// non-fatal: we log and leave the fields at zero so the rest of the
-	// card still renders.
 	if err := populateRepoStats(ctx, env, cfg, affiliations, login, &d); err != nil {
 		if env.Log != nil {
 			env.Log.Warn("base: repo stats aggregation failed", "err", err)
 		}
 	}
 
-	// When indepth is enabled, replace the trailing-year activity counts
-	// with totals summed across the user's entire GitHub lifetime via the
-	// contributionsCollection's date-window form (max 1 year per query).
-	// A failure here is non-fatal: we log and keep the last-year values.
 	if cfg.Indepth {
 		if err := populateIndepthContributions(ctx, env, login, q.User.CreatedAt.Time, &d); err != nil {
 			if env.Log != nil {
@@ -191,12 +166,6 @@ func Fetch(ctx context.Context, env *plugin.Env, cfg Config) (Data, error) {
 		}
 	}
 
-	// When commits_authoring is set, replace d.Activity.Commits with the
-	// sum of REST commit-search totals across the configured patterns.
-	// This is more accurate than the GraphQL contributionsCollection count
-	// for users whose commits are authored under multiple email identities
-	// (e.g. github noreply + personal email). Non-fatal on failure: the
-	// previous value of d.Activity.Commits is left in place.
 	if len(cfg.CommitsAuthoring) > 0 && env.REST != nil {
 		if err := populateAuthoredCommitCount(ctx, env, cfg, login, &d); err != nil {
 			if env.Log != nil {
@@ -207,8 +176,7 @@ func Fetch(ctx context.Context, env *plugin.Env, cfg Config) (Data, error) {
 
 	d.Calendar = lastNDays(q, 14)
 
-	// Fetch and base64-embed the avatar so the SVG is self-contained and
-	// survives GitHub's Camo proxy. Tests pass env.HTTP == nil to skip this.
+	// Base64-embed the avatar so the SVG is self-contained and survives GitHub's Camo proxy.
 	if env.HTTP != nil && d.User.AvatarURL != "" {
 		if b64, err := img.FetchAvatar(ctx, env.HTTP, d.User.AvatarURL); err == nil {
 			d.AvatarB64 = b64
@@ -220,10 +188,6 @@ func Fetch(ctx context.Context, env *plugin.Env, cfg Config) (Data, error) {
 	return d, nil
 }
 
-// toRepositoryAffiliations maps user-facing affiliation strings (lowercase,
-// snake_case) to the corresponding githubv4 enum constants. Unknown values
-// are silently dropped; the caller falls back to OWNER when the result is
-// empty.
 func toRepositoryAffiliations(raw []string) []githubv4.RepositoryAffiliation {
 	out := make([]githubv4.RepositoryAffiliation, 0, len(raw))
 	for _, r := range raw {
@@ -239,11 +203,8 @@ func toRepositoryAffiliations(raw []string) []githubv4.RepositoryAffiliation {
 	return out
 }
 
-// repoStatsQuery walks the user's repositories one page at a time to
-// aggregate per-repo counters (forks, stars, watchers, releases) and the
-// licenseInfo.spdxId distribution. The collection is filtered server-side
-// by ownerAffiliations and (optionally) isFork; the includeForks flag is
-// driven by cfg.Repos.Forks.
+const defaultRepoBatch = 100
+
 type repoStatsQuery struct {
 	User struct {
 		Repositories struct {
@@ -265,14 +226,6 @@ type repoStatsQuery struct {
 	} `graphql:"user(login: $login)"`
 }
 
-// populateRepoStats paginates over the user's repositories using
-// cfg.Repos.Batch as the page size, capping the total number of repos
-// inspected at cfg.Repos.Max. It mutates d.Repositories in place with the
-// aggregated values. Returns nil if cfg.Repos.Max == 0 (caller opted out).
-//
-// License selection picks the most common spdxId across the inspected
-// repos; ties are broken by first-encountered order (insertion order in
-// the licenseOrder slice).
 func populateRepoStats(
 	ctx context.Context,
 	env *plugin.Env,
@@ -287,19 +240,16 @@ func populateRepoStats(
 
 	batch := cfg.Repos.Batch
 	if batch <= 0 {
-		batch = 100
+		batch = defaultRepoBatch
 	}
 	if batch > cfg.Repos.Max {
 		batch = cfg.Repos.Max
 	}
 
-	// For per-repo aggregates (stars / forks / watchers / releases /
-	// license) we deliberately scope to OWNER only — including
-	// collaborator/org-member repos would attribute their stars/watchers
-	// to this user (e.g. a popular org repo with 1k stars would add 1k
-	// stars per member). Upstream's classic template makes the same call.
+	// Scope aggregates to OWNER only: counting collaborator/org-member repos would
+	// attribute their stars/watchers to every member.
 	ownerOnly := []githubv4.RepositoryAffiliation{githubv4.RepositoryAffiliationOwner}
-	_ = affiliations // affiliations is honored by the top-level counts; aggregates use ownerOnly
+	_ = affiliations // aggregates use ownerOnly, not the configured affiliations
 	vars := map[string]any{
 		"login":        githubv4.String(login),
 		"affiliations": ownerOnly,
@@ -307,9 +257,7 @@ func populateRepoStats(
 		"after":        (*githubv4.String)(nil),
 		"includeForks": (*githubv4.Boolean)(nil),
 	}
-	// includeForks is a nullable Boolean: nil means "no filter" (include
-	// forks), false means "exclude forks". The default upstream behavior
-	// excludes forks unless cfg.Repos.Forks is true.
+	// includeForks is a nullable Boolean: nil includes forks, false excludes them.
 	if !cfg.Repos.Forks {
 		vars["includeForks"] = githubv4.NewBoolean(githubv4.Boolean(false))
 	}
@@ -321,9 +269,7 @@ func populateRepoStats(
 		licenseOrder                     []string
 	)
 
-	// pageGuard protects against an API that reports HasNextPage
-	// indefinitely. cfg.Repos.Max / batch rounded up is the natural cap;
-	// add a small fudge factor in case the API returns short pages.
+	// Bound iterations in case the API reports HasNextPage indefinitely.
 	pageGuard := (cfg.Repos.Max/batch)*2 + 4
 
 	for pageGuard > 0 {
@@ -334,8 +280,6 @@ func populateRepoStats(
 		}
 		pageGuard--
 
-		// Shrink the page size on the final page so we don't fetch more
-		// than cfg.Repos.Max repos overall.
 		remaining := cfg.Repos.Max - seen
 		if remaining <= 0 {
 			break
@@ -382,25 +326,22 @@ func populateRepoStats(
 	d.Repositories.Watchers = watchers
 	d.Repositories.Releases = releases
 
-	// Pick the most common license; tie-break by first-encountered order.
 	if len(licenseOrder) > 0 {
-		best := licenseOrder[0]
-		bestN := licenseCounts[best]
+		mostCommonLicense := licenseOrder[0]
+		mostCommonCount := licenseCounts[mostCommonLicense]
 		for _, spdx := range licenseOrder[1:] {
-			if licenseCounts[spdx] > bestN {
-				best = spdx
-				bestN = licenseCounts[spdx]
+			if licenseCounts[spdx] > mostCommonCount {
+				mostCommonLicense = spdx
+				mostCommonCount = licenseCounts[spdx]
 			}
 		}
-		d.Repositories.License = best
+		d.Repositories.License = mostCommonLicense
 	}
 
 	return nil
 }
 
-// indepthContribQuery is a minimal contributions-only query used to sum
-// activity counts across a date window. The window is bound via the
-// $from and $to variables (both DateTime, max 1 year apart).
+// $from and $to span at most 1 year, the GitHub API limit per query.
 type indepthContribQuery struct {
 	User struct {
 		ContributionsCollection struct {
@@ -412,19 +353,9 @@ type indepthContribQuery struct {
 	} `graphql:"user(login: $login)"`
 }
 
-// maxIndepthWindows caps the number of year-long windows we will query when
-// summing indepth contributions. GitHub was founded in 2008, so even the
-// oldest accounts top out around ~18-19 windows; 20 leaves headroom for
-// clock skew and a fresh today vs. CreatedAt edge case.
+// GitHub launched in 2008, so the oldest accounts span ~18-19 yearly windows.
 const maxIndepthWindows = 20
 
-// populateIndepthContributions sums activity counts (commits, PRs opened,
-// PRs reviewed, issues opened) across the user's entire history by walking
-// 1-year windows from `now` backwards to createdAt. The summed totals
-// replace d.Activity.{Commits,PRsOpened,PRsReviewed,IssuesOpened}.
-//
-// Errors from individual windows abort the loop and the caller leaves the
-// last-year values intact (no partial overwrite).
 func populateIndepthContributions(
 	ctx context.Context,
 	env *plugin.Env,
@@ -474,12 +405,10 @@ func populateIndepthContributions(
 		prsReviewed += int(q.User.ContributionsCollection.TotalPullRequestReviewContributions)
 		issues += int(q.User.ContributionsCollection.TotalIssueContributions)
 
-		// Once we've covered back to the account's creation, stop.
 		if !from.After(createdAt) {
 			break
 		}
 
-		// Advance the window backwards by 1 year.
 		to = from
 		from = to.AddDate(-1, 0, 0)
 		if from.Before(createdAt) {
@@ -495,25 +424,9 @@ func populateIndepthContributions(
 	return nil
 }
 
-// maxAuthoringPatterns caps how many commits_authoring entries we will
-// search. GitHub's commit-search REST endpoint is rate-limited to 30
-// requests/minute, so we keep this conservative to avoid burning the
-// whole quota on a single render. Entries beyond the cap are logged
-// and skipped.
+// GitHub's commit-search endpoint allows 30 requests/minute; cap patterns to stay well under it.
 const maxAuthoringPatterns = 5
 
-// populateAuthoredCommitCount iterates each cfg.CommitsAuthoring entry,
-// translates it to a commit-search query (author:<login> for login-style
-// entries, author-email:<email> otherwise), and issues a paginated
-// search.commits REST call with PerPage=1 to read result.GetTotal().
-// The per-pattern totals are summed into d.Activity.AuthoredCommits,
-// and on success d.Activity.Commits is REPLACED by that sum (matching
-// upstream's behavior when commits_authoring is configured).
-//
-// The function is intentionally tolerant: errors from individual patterns
-// are logged and skipped. If every pattern errors and the running total
-// is zero, the function returns the first error so the caller can log a
-// single representative failure and leave d.Activity.Commits untouched.
 func populateAuthoredCommitCount(
 	ctx context.Context,
 	env *plugin.Env,
@@ -582,7 +495,6 @@ func populateAuthoredCommitCount(
 		if firstErr != nil {
 			return firstErr
 		}
-		// No patterns produced a query (all empty/blank); leave Commits as-is.
 		return nil
 	}
 
@@ -591,17 +503,13 @@ func populateAuthoredCommitCount(
 	return nil
 }
 
-// buildCommitSearchQuery turns a single commits_authoring entry into a
-// GitHub commit-search query string. The placeholder ".user.login" and
-// any entry equal to (or @-prefixed equivalent of) the user's login map
-// to "author:<login>"; everything else is treated as an email pattern
-// and emitted as "author-email:<entry>".
 func buildCommitSearchQuery(entry, login, loginLower string) string {
 	if entry == "" {
 		return ""
 	}
 	trimmed := strings.TrimPrefix(entry, "@")
-	if entry == ".user.login" || strings.EqualFold(trimmed, login) || strings.EqualFold(trimmed, loginLower) {
+	matchesLogin := entry == ".user.login" || strings.EqualFold(trimmed, login) || strings.EqualFold(trimmed, loginLower)
+	if matchesLogin {
 		if login == "" {
 			return ""
 		}
@@ -610,10 +518,6 @@ func buildCommitSearchQuery(entry, login, loginLower string) string {
 	return "author-email:" + entry
 }
 
-// lastNDays flattens the (weeks → days) contribution calendar produced by
-// GraphQL into the trailing-n-day window the renderer expects. Days are
-// returned in chronological order; if the API returned fewer than n days,
-// all available days are returned.
 func lastNDays(q baseQuery, n int) []DayCount {
 	type day struct {
 		date  string

@@ -9,9 +9,6 @@ import (
 	"github.com/twangodev/gmetrics/internal/plugin"
 )
 
-// followersQuery returns up to `first` followers of the user, with each
-// avatar URL pre-sized to the requested pixel size. TotalCount is the
-// upstream count (which may exceed the number of returned nodes).
 type followersQuery struct {
 	User struct {
 		Followers struct {
@@ -24,7 +21,6 @@ type followersQuery struct {
 	} `graphql:"user(login: $login)"`
 }
 
-// followingQuery is the symmetric query for the user's "following" list.
 type followingQuery struct {
 	User struct {
 		Following struct {
@@ -37,9 +33,6 @@ type followingQuery struct {
 	} `graphql:"user(login: $login)"`
 }
 
-// Fetch executes one GraphQL query per requested type and (when env.HTTP is
-// available) eagerly fetches each avatar so the rendered SVG is fully
-// self-contained.
 func (*Plugin) Fetch(ctx context.Context, env *plugin.Env, raw any) (any, error) {
 	cfg, ok := raw.(Config)
 	if !ok {
@@ -75,25 +68,19 @@ func (*Plugin) Fetch(ctx context.Context, env *plugin.Env, raw any) (any, error)
 	return data, nil
 }
 
-// fetchType dispatches on the requested type and runs the corresponding
-// GraphQL query, then (optionally) converts avatar URLs to data: URLs. The
-// returned total is the upstream totalCount, which may exceed len(people)
-// when Config.Limit is smaller than the user's full follower/following set.
 func fetchType(ctx context.Context, env *plugin.Env, login, t string, cfg Config) ([]Person, int, error) {
-	// GitHub serves the avatar at the requested size; we ask for 2x the
-	// render size so the bitmap is crisp on retina displays.
-	avatarSize := cfg.Size * 2
+	const retinaScale = 2
 	vars := map[string]any{
 		"login": githubv4.String(login),
 		"first": githubv4.Int(cfg.Limit),
-		"size":  githubv4.Int(avatarSize),
+		"size":  githubv4.Int(cfg.Size * retinaScale),
 	}
 
 	var nodes []struct {
 		Login     githubv4.String
 		AvatarURL githubv4.String
 	}
-	var total int
+	var upstreamTotal int
 
 	switch t {
 	case "followers":
@@ -101,7 +88,7 @@ func fetchType(ctx context.Context, env *plugin.Env, login, t string, cfg Config
 		if err := env.GraphQL.Query(ctx, &q, vars); err != nil {
 			return nil, 0, err
 		}
-		total = int(q.User.Followers.TotalCount)
+		upstreamTotal = int(q.User.Followers.TotalCount)
 		for _, n := range q.User.Followers.Nodes {
 			nodes = append(nodes, struct {
 				Login     githubv4.String
@@ -113,7 +100,7 @@ func fetchType(ctx context.Context, env *plugin.Env, login, t string, cfg Config
 		if err := env.GraphQL.Query(ctx, &q, vars); err != nil {
 			return nil, 0, err
 		}
-		total = int(q.User.Following.TotalCount)
+		upstreamTotal = int(q.User.Following.TotalCount)
 		for _, n := range q.User.Following.Nodes {
 			nodes = append(nodes, struct {
 				Login     githubv4.String
@@ -130,8 +117,6 @@ func fetchType(ctx context.Context, env *plugin.Env, login, t string, cfg Config
 		if env.HTTP != nil {
 			b64, err := img.FetchAvatar(ctx, env.HTTP, string(n.AvatarURL))
 			if err != nil {
-				// Non-fatal: log and continue with empty avatar so the
-				// rest of the section still renders.
 				if env.Log != nil {
 					env.Log.Warn("people: avatar fetch failed",
 						"login", p.Login, "err", err)
@@ -142,5 +127,5 @@ func fetchType(ctx context.Context, env *plugin.Env, login, t string, cfg Config
 		}
 		out = append(out, p)
 	}
-	return out, total, nil
+	return out, upstreamTotal, nil
 }

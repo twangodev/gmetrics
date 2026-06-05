@@ -13,9 +13,6 @@ import (
 	"github.com/twangodev/gmetrics/internal/plugin"
 )
 
-// canned payloads for each endpoint. Returned verbatim by the test server
-// so failures clearly identify which payload (and therefore which
-// endpoint) the production code mis-decoded.
 const (
 	playerSummariesJSON = `{
 		"response": {
@@ -45,8 +42,7 @@ const (
 			]
 		}
 	}`
-	// 3 of 5 achievements unlocked; returned for whatever appid the stub is
-	// asked about, which suffices for the single-game assertions below.
+	// 3 of 5 achieved; served for any appid the stub is queried about.
 	playerAchievementsJSON = `{
 		"playerstats": {
 			"success": true,
@@ -58,9 +54,6 @@ const (
 	}`
 )
 
-// newStubServer stands up an httptest.Server that returns the canned JSON
-// payload that matches each Steam API path. Any other path returns 404 so
-// regressions in URL construction are loud.
 func newStubServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -87,10 +80,6 @@ func newStubServer(t *testing.T) *httptest.Server {
 	return httptest.NewServer(mux)
 }
 
-// TestFetch_AllEndpoints_Mocked drives the fetch path against an
-// httptest-served set of endpoints. It does not exercise the icon/avatar
-// fetch path: env.HTTP is intentionally left nil so the only network
-// activity is the four Steam API calls.
 func TestFetch_AllEndpoints_Mocked(t *testing.T) {
 	srv := newStubServer(t)
 	t.Cleanup(srv.Close)
@@ -104,21 +93,17 @@ func TestFetch_AllEndpoints_Mocked(t *testing.T) {
 	}
 	require.NoError(t, cfg.validate())
 
-	// Pass the httptest client to FetchWith so the test server's
-	// self-signed/loopback wiring is honoured. env is constructed with
-	// HTTP = nil, which the plugin uses as the signal to skip icon and
-	// avatar fetches (those live on media.steampowered.com).
-	env := &plugin.Env{}
+	envWithoutMediaClient := &plugin.Env{}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	data, err := FetchWith(ctx, srv.Client(), env, cfg)
+	data, err := FetchWith(ctx, srv.Client(), envWithoutMediaClient, cfg)
 	require.NoError(t, err)
 
 	require.Equal(t, "TestUser", data.Player.Name)
 	require.Equal(t, 42, data.Player.Level)
 	require.Equal(t, 2, data.Player.TotalGames)
-	// 12000 + 600 minutes = 12600 / 60 = 210 hours.
+	// (12000 + 600) min / 60 = 210 h.
 	require.InDelta(t, 210.0, data.Player.TotalHours, 0.001)
 	require.Empty(t, data.Player.AvatarB64, "env.HTTP is nil so avatar must be skipped")
 
@@ -127,9 +112,9 @@ func TestFetch_AllEndpoints_Mocked(t *testing.T) {
 	require.Equal(t, "Counter-Strike", top.Name, "highest playtime wins")
 	require.InDelta(t, 200.0, top.PlaytimeHours, 0.001)
 	require.Empty(t, top.IconB64, "env.HTTP is nil so icons must be skipped")
-	// 12000 / 12600 total minutes.
+	// 12000 / 12600 total min.
 	require.InDelta(t, 0.952, top.PercentOfTotal, 0.01)
-	// deck (9000) dominates desktop-linux (10000-9000) and windows (2000).
+	// deck (9000) beats desktop-linux (10000-9000) and windows (2000).
 	require.Equal(t, "Steam Deck", top.Platform)
 	require.Equal(t, "Nov 14, 2023", top.LastPlayed)
 	require.True(t, top.HasAchievements)
@@ -141,9 +126,6 @@ func TestFetch_AllEndpoints_Mocked(t *testing.T) {
 	require.InDelta(t, 3.0, data.Recently[0].PlaytimeHours, 0.001)
 }
 
-// TestRender_AllSections feeds a small, pre-built Data through Render and
-// asserts the produced Fragment is non-empty with a height consistent with
-// stacking all three section types.
 func TestRender_AllSections(t *testing.T) {
 	p := &Plugin{}
 	data := Data{
@@ -171,9 +153,6 @@ func TestRender_AllSections(t *testing.T) {
 	require.Greater(t, frag.Height, 80, "three-section card should exceed 80 px tall")
 	require.Equal(t, fragmentWidth, frag.Width)
 
-	// Smoke-check the body contains markers from each section so a
-	// regression that silently drops one is caught here rather than in
-	// the integration tests downstream.
 	require.True(t, strings.Contains(frag.Body, "steam-player"))
 	require.True(t, strings.Contains(frag.Body, `data-section="most-played"`))
 	require.True(t, strings.Contains(frag.Body, `data-section="recently-played"`))
