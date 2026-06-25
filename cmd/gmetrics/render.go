@@ -94,7 +94,7 @@ func runRender(cmd *cobra.Command, args []string) error {
 		Log:     logger,
 	}
 
-	engine := &metrics.Engine{Env: env, Strict: renderStrict}
+	engine := &metrics.Engine{Env: env, Strict: renderStrict || cfg.Plugins.Errors.Fatal}
 	frags, err := engine.Render(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("engine render: %w", err)

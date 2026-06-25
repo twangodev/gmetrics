@@ -69,6 +69,7 @@ var envMappings = map[string]envMapping{
 	"FILENAME":                        {"filename", envString},
 	"TOKEN":                           {"github.token", envString},
 	"OUTPUT_ACTION":                   {"output.action", envString},
+	"PLUGINS_ERRORS_FATAL":            {"plugins.errors.fatal", envBool},
 	"BASE":                            {"base.sections", envCSV},
 	"BASE_HIREABLE":                   {"base.hireable", envBool},
 	"BASE_INDEPTH":                    {"base.indepth", envBool},
