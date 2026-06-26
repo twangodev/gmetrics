@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"runtime/debug"
 	"sort"
 	"sync"
 	"time"
@@ -220,6 +221,11 @@ func enrichAchievements(ctx context.Context, hc *http.Client, env *plugin.Env, c
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil && env != nil && env.Log != nil {
+					env.Log.Error("steam: achievements panicked", "appid", games[i].AppID, "panic", r, "stack", string(debug.Stack()))
+				}
+			}()
 			unlocked, total, err := getAchievements(ctx, hc, cfg, games[i].AppID)
 			if err != nil {
 				if env != nil && env.Log != nil {
