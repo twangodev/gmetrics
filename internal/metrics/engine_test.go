@@ -31,8 +31,9 @@ func (f fakePlugin) Render(env *plugin.Env, data any) (plugin.Fragment, error) {
 	return f.renderFn(env, data)
 }
 
-func registerFake(name string, fp fakePlugin) {
+func registerFake(t *testing.T, name string, fp fakePlugin) {
 	fp.name = name
+	t.Cleanup(plugin.Snapshot())
 	plugin.Register(name, func() plugin.Plugin { return fp })
 }
 
@@ -44,7 +45,7 @@ func newTestEnv() *plugin.Env {
 }
 
 func TestEngine_RunsBaseFirstThenOthers(t *testing.T) {
-	registerFake("base", fakePlugin{
+	registerFake(t, "base", fakePlugin{
 		fetch: func(ctx context.Context, env *plugin.Env, cfg any) (any, error) {
 			// Must be base.Data: the engine type-asserts it to populate Env.User.
 			return base.Data{
@@ -55,7 +56,7 @@ func TestEngine_RunsBaseFirstThenOthers(t *testing.T) {
 			return plugin.Fragment{Body: "<g id=\"base\"/>", Width: 480, Height: 200}, nil
 		},
 	})
-	registerFake("languages", fakePlugin{
+	registerFake(t, "languages", fakePlugin{
 		fetch: func(ctx context.Context, env *plugin.Env, cfg any) (any, error) {
 			require.Equal(t, "octocat", env.User.Login, "languages.Fetch should see Env.User populated by base")
 			return "lang-marker", nil
@@ -80,7 +81,7 @@ func TestEngine_RunsBaseFirstThenOthers(t *testing.T) {
 }
 
 func TestEngine_NonStrict_SubstitutesErrorFragment(t *testing.T) {
-	registerFake("base", fakePlugin{
+	registerFake(t, "base", fakePlugin{
 		fetch: func(ctx context.Context, env *plugin.Env, cfg any) (any, error) {
 			return base.Data{User: plugin.UserContext{Login: "octocat"}}, nil
 		},
@@ -88,7 +89,7 @@ func TestEngine_NonStrict_SubstitutesErrorFragment(t *testing.T) {
 			return plugin.Fragment{Body: "<g id=\"base\"/>", Width: 480, Height: 200}, nil
 		},
 	})
-	registerFake("languages", fakePlugin{
+	registerFake(t, "languages", fakePlugin{
 		fetch: func(ctx context.Context, env *plugin.Env, cfg any) (any, error) {
 			return nil, errors.New("boom: graphql exploded")
 		},
@@ -145,8 +146,8 @@ func langsPeopleConfig() *config.Config {
 }
 
 func TestEngine_NonStrict_RecoversFetchPanic(t *testing.T) {
-	registerFake("base", okBase())
-	registerFake("languages", fakePlugin{
+	registerFake(t, "base", okBase())
+	registerFake(t, "languages", fakePlugin{
 		fetch: func(ctx context.Context, env *plugin.Env, cfg any) (any, error) {
 			panic("assignment to entry in nil map")
 		},
@@ -155,7 +156,7 @@ func TestEngine_NonStrict_RecoversFetchPanic(t *testing.T) {
 			return plugin.Fragment{}, nil
 		},
 	})
-	registerFake("people", okPeople())
+	registerFake(t, "people", okPeople())
 
 	engine := &metrics.Engine{Env: newTestEnv(), Strict: false}
 	frags, err := engine.Render(context.Background(), langsPeopleConfig())
@@ -167,8 +168,8 @@ func TestEngine_NonStrict_RecoversFetchPanic(t *testing.T) {
 }
 
 func TestEngine_NonStrict_RecoversRenderPanic(t *testing.T) {
-	registerFake("base", okBase())
-	registerFake("languages", fakePlugin{
+	registerFake(t, "base", okBase())
+	registerFake(t, "languages", fakePlugin{
 		fetch: func(ctx context.Context, env *plugin.Env, cfg any) (any, error) {
 			return "lang-ok", nil
 		},
@@ -176,7 +177,7 @@ func TestEngine_NonStrict_RecoversRenderPanic(t *testing.T) {
 			panic("index out of range [3] with length 2")
 		},
 	})
-	registerFake("people", okPeople())
+	registerFake(t, "people", okPeople())
 
 	engine := &metrics.Engine{Env: newTestEnv(), Strict: false}
 	frags, err := engine.Render(context.Background(), langsPeopleConfig())
@@ -188,8 +189,8 @@ func TestEngine_NonStrict_RecoversRenderPanic(t *testing.T) {
 }
 
 func TestEngine_Strict_FetchPanicAbortsCleanly(t *testing.T) {
-	registerFake("base", okBase())
-	registerFake("languages", fakePlugin{
+	registerFake(t, "base", okBase())
+	registerFake(t, "languages", fakePlugin{
 		fetch: func(ctx context.Context, env *plugin.Env, cfg any) (any, error) {
 			panic("boom in fetch")
 		},
@@ -207,8 +208,8 @@ func TestEngine_Strict_FetchPanicAbortsCleanly(t *testing.T) {
 }
 
 func TestEngine_Strict_RenderPanicAbortsCleanly(t *testing.T) {
-	registerFake("base", okBase())
-	registerFake("languages", fakePlugin{
+	registerFake(t, "base", okBase())
+	registerFake(t, "languages", fakePlugin{
 		fetch: func(ctx context.Context, env *plugin.Env, cfg any) (any, error) {
 			return "lang-ok", nil
 		},
@@ -226,7 +227,7 @@ func TestEngine_Strict_RenderPanicAbortsCleanly(t *testing.T) {
 }
 
 func TestEngine_NonStrict_RecoversBasePanic(t *testing.T) {
-	registerFake("base", fakePlugin{
+	registerFake(t, "base", fakePlugin{
 		fetch: func(ctx context.Context, env *plugin.Env, cfg any) (any, error) {
 			panic("base fetch exploded")
 		},
@@ -244,7 +245,7 @@ func TestEngine_NonStrict_RecoversBasePanic(t *testing.T) {
 }
 
 func TestEngine_Strict_BasePanicAbortsCleanly(t *testing.T) {
-	registerFake("base", fakePlugin{
+	registerFake(t, "base", fakePlugin{
 		fetch: func(ctx context.Context, env *plugin.Env, cfg any) (any, error) {
 			panic("base fetch exploded")
 		},
@@ -261,7 +262,7 @@ func TestEngine_Strict_BasePanicAbortsCleanly(t *testing.T) {
 }
 
 func TestEngine_Strict_AbortsOnPluginError(t *testing.T) {
-	registerFake("base", fakePlugin{
+	registerFake(t, "base", fakePlugin{
 		fetch: func(ctx context.Context, env *plugin.Env, cfg any) (any, error) {
 			return base.Data{User: plugin.UserContext{Login: "octocat"}}, nil
 		},
@@ -269,7 +270,7 @@ func TestEngine_Strict_AbortsOnPluginError(t *testing.T) {
 			return plugin.Fragment{Body: "<g id=\"base\"/>", Width: 480, Height: 200}, nil
 		},
 	})
-	registerFake("languages", fakePlugin{
+	registerFake(t, "languages", fakePlugin{
 		fetch: func(ctx context.Context, env *plugin.Env, cfg any) (any, error) {
 			return nil, errors.New("boom: graphql exploded")
 		},
