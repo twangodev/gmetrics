@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -205,6 +206,11 @@ func fetchIndepth(ctx context.Context, env *plugin.Env, cfg Config) (Data, error
 	if quiet && env.Log != nil {
 		stopHeartbeat = make(chan struct{})
 		go func() {
+			defer func() {
+				if r := recover(); r != nil && env.Log != nil {
+					env.Log.Error("languages: heartbeat panicked", "panic", r, "stack", string(debug.Stack()))
+				}
+			}()
 			t := time.NewTicker(30 * time.Second)
 			defer t.Stop()
 			for {
@@ -227,7 +233,19 @@ func fetchIndepth(ctx context.Context, env *plugin.Env, cfg Config) (Data, error
 	total := len(tasks)
 	for _, t := range tasks {
 		t := t
-		g.Go(func() error {
+		g.Go(func() (err error) {
+			defer func() {
+				if r := recover(); r != nil {
+					repo := t.FullName
+					if quiet {
+						repo = "***"
+					}
+					if env.Log != nil {
+						env.Log.Error("languages: walk panicked", "repo", repo, "panic", r, "stack", string(debug.Stack()))
+					}
+					err = nil
+				}
+			}()
 			return withRepoBudget(gctx, func(gctx context.Context) error {
 				t0 := time.Now()
 				owner, name := splitFullName(t.FullName)
@@ -425,6 +443,12 @@ func walkRepo(ctx context.Context, cloneURL string, preds []string) (walkResult,
 	runErrCh := make(chan error, 1)
 	tLog := time.Now()
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				runErrCh <- fmt.Errorf("panic: %v\n%s", r, debug.Stack())
+				_ = pw.Close()
+			}
+		}()
 		// AddOptions overwrites Command.ctx, so ctx must travel inside CommandOptions, not NewCommandWithContext.
 		runErrCh <- gitcmd.NewCommand(args...).
 			AddOptions(gitcmd.CommandOptions{

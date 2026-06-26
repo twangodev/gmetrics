@@ -17,6 +17,10 @@ inputs:
     description: 'Output mode (v1 supports: none)'
     required: false
     default: none
+  plugins_errors_fatal:
+    description: Fail the whole render (and the action) on any plugin error, instead of embedding an error box in the image
+    required: false
+    default: 'no'
   base:
     description: Comma-separated base sections (header, activity, community, repositories, metadata)
     required: false

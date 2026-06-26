@@ -35,11 +35,16 @@ type RepoFetch struct {
 }
 
 type PluginsConfig struct {
-	Languages LanguagesConfig `koanf:"languages"`
-	People    PeopleConfig    `koanf:"people"`
-	Wakatime  WakatimeConfig  `koanf:"wakatime"`
-	Music     MusicConfig     `koanf:"music"`
-	Steam     SteamConfig     `koanf:"steam"`
+	Errors    PluginErrorsConfig `koanf:"errors"`
+	Languages LanguagesConfig    `koanf:"languages"`
+	People    PeopleConfig       `koanf:"people"`
+	Wakatime  WakatimeConfig     `koanf:"wakatime"`
+	Music     MusicConfig        `koanf:"music"`
+	Steam     SteamConfig        `koanf:"steam"`
+}
+
+type PluginErrorsConfig struct {
+	Fatal bool `koanf:"fatal"`
 }
 
 type LanguagesConfig struct {
@@ -107,6 +112,8 @@ base:
     batch: 100
     forks: false
 plugins:
+  errors:
+    fatal: false
   languages:
     enabled: false
     sections: [most-used]

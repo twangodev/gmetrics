@@ -18,13 +18,6 @@ import (
 	"github.com/twangodev/gmetrics/internal/metrics"
 	"github.com/twangodev/gmetrics/internal/plugin"
 	"github.com/twangodev/gmetrics/internal/render"
-
-	basepkg "github.com/twangodev/gmetrics/internal/plugins/base"
-	langpkg "github.com/twangodev/gmetrics/internal/plugins/languages"
-	musicpkg "github.com/twangodev/gmetrics/internal/plugins/music"
-	peoplepkg "github.com/twangodev/gmetrics/internal/plugins/people"
-	steampkg "github.com/twangodev/gmetrics/internal/plugins/steam"
-	wakapkg "github.com/twangodev/gmetrics/internal/plugins/wakatime"
 )
 
 // rewriteTransport redirects every request to target.Host (keeping path+query)
@@ -108,16 +101,6 @@ func e2eHandler(t *testing.T) http.Handler {
 	})
 
 	return mux
-}
-
-// reRegisterRealPlugins restores the real ctors after engine_test.go's fakes.
-func reRegisterRealPlugins() {
-	plugin.Register("base", func() plugin.Plugin { return basepkg.Plugin{} })
-	plugin.Register("languages", func() plugin.Plugin { return &langpkg.Plugin{} })
-	plugin.Register("people", func() plugin.Plugin { return &peoplepkg.Plugin{} })
-	plugin.Register("wakatime", func() plugin.Plugin { return wakapkg.Plugin{} })
-	plugin.Register("music", func() plugin.Plugin { return &musicpkg.Plugin{} })
-	plugin.Register("steam", func() plugin.Plugin { return &steampkg.Plugin{} })
 }
 
 // stripVolatile is the hook for redacting run-to-run drift; nothing drifts yet.
@@ -207,9 +190,6 @@ func TestE2E_FullPipelineGolden(t *testing.T) {
 		},
 		Output: config.OutputConfig{Action: "none"},
 	}
-
-	// music/steam base URLs aren't engine-wired; rewriteTransport redirects their hard-coded hosts.
-	reRegisterRealPlugins()
 
 	engine := &metrics.Engine{Env: env, Strict: false}
 	frags, err := engine.Render(ctx, cfg)

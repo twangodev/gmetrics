@@ -46,6 +46,22 @@ func Lookup(name string) (Plugin, bool) {
 	return ctor(), true
 }
 
+// Snapshot captures the current registry and returns a function that restores
+// it, so tests can register fakes and undo them via t.Cleanup.
+func Snapshot() (restore func()) {
+	regMu.Lock()
+	defer regMu.Unlock()
+	saved := make(map[string]func() Plugin, len(reg))
+	for k, v := range reg {
+		saved[k] = v
+	}
+	return func() {
+		regMu.Lock()
+		defer regMu.Unlock()
+		reg = saved
+	}
+}
+
 func Names() []string {
 	regMu.RLock()
 	defer regMu.RUnlock()

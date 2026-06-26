@@ -5,6 +5,7 @@ package metrics
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 
 	"golang.org/x/sync/errgroup"
 
@@ -55,7 +56,7 @@ func (e *Engine) Render(ctx context.Context, cfg *config.Config) ([]plugin.Fragm
 	for i, r := range runs {
 		i, r := i, r
 		g.Go(func() error {
-			data, err := r.p.Fetch(gctx, e.Env, r.cfg)
+			data, err := e.safeFetch(gctx, r.name, r.p, r.cfg)
 			results[i] = pluginResult{name: r.name, data: data, err: err}
 			if e.Strict && err != nil {
 				return fmt.Errorf("plugin %s: %w", r.name, err)
@@ -74,7 +75,7 @@ func (e *Engine) Render(ctx context.Context, cfg *config.Config) ([]plugin.Fragm
 			frags = append(frags, plugin.ErrorFragment(r.name, res.err))
 			continue
 		}
-		frag, err := r.p.Render(e.Env, res.data)
+		frag, err := e.safeRender(r.name, r.p, res.data)
 		if err != nil {
 			if e.Strict {
 				return nil, fmt.Errorf("plugin %s render: %w", r.name, err)
@@ -87,10 +88,14 @@ func (e *Engine) Render(ctx context.Context, cfg *config.Config) ([]plugin.Fragm
 	}
 
 	if includesSection(cfg.Base.Sections, "metadata") && baseData != nil {
-		if metaFrag, err := base.MetadataFragment(baseData); err == nil && metaFrag.Body != "" {
-			frags = append(frags, metaFrag)
-		} else if err != nil {
+		metaFrag, err := e.safeMetadata(baseData)
+		if err != nil {
+			if e.Strict {
+				return nil, fmt.Errorf("metadata render: %w", err)
+			}
 			e.Env.Log.Warn("metadata render failed", "err", err)
+		} else if metaFrag.Body != "" {
+			frags = append(frags, metaFrag)
 		}
 	}
 
@@ -104,6 +109,29 @@ func includesSection(xs []string, s string) bool {
 		}
 	}
 	return false
+}
+
+func (e *Engine) recoverPanic(errp *error, msg string, fields ...any) {
+	if r := recover(); r != nil {
+		fields = append(fields, "panic", r, "stack", string(debug.Stack()))
+		e.Env.Log.Error(msg, fields...)
+		*errp = fmt.Errorf("panic: %v", r)
+	}
+}
+
+func (e *Engine) safeFetch(ctx context.Context, name string, p plugin.Plugin, cfg any) (data any, err error) {
+	defer e.recoverPanic(&err, "plugin fetch panicked", "plugin", name)
+	return p.Fetch(ctx, e.Env, cfg)
+}
+
+func (e *Engine) safeRender(name string, p plugin.Plugin, data any) (frag plugin.Fragment, err error) {
+	defer e.recoverPanic(&err, "plugin render panicked", "plugin", name)
+	return p.Render(e.Env, data)
+}
+
+func (e *Engine) safeMetadata(data any) (frag plugin.Fragment, err error) {
+	defer e.recoverPanic(&err, "metadata render panicked")
+	return base.MetadataFragment(data)
 }
 
 // runBase populates Env.User from the base output so downstream plugins can read it.
@@ -131,7 +159,7 @@ func (e *Engine) runBase(ctx context.Context, cfg *config.Config) (plugin.Fragme
 		},
 	}
 
-	data, err := bp.Fetch(ctx, e.Env, baseCfg)
+	data, err := e.safeFetch(ctx, "base", bp, baseCfg)
 	if err != nil {
 		if e.Strict {
 			return plugin.Fragment{}, nil, fmt.Errorf("plugin base: %w", err)
@@ -144,7 +172,7 @@ func (e *Engine) runBase(ctx context.Context, cfg *config.Config) (plugin.Fragme
 		e.Env.User = bd.User
 	}
 
-	frag, err := bp.Render(e.Env, data)
+	frag, err := e.safeRender("base", bp, data)
 	if err != nil {
 		if e.Strict {
 			return plugin.Fragment{}, nil, fmt.Errorf("plugin base render: %w", err)
