@@ -261,6 +261,41 @@ func TestEngine_Strict_BasePanicAbortsCleanly(t *testing.T) {
 	require.Contains(t, err.Error(), "panic")
 }
 
+func TestEngine_NonStrict_RecoversBaseRenderPanic(t *testing.T) {
+	registerFake(t, "base", fakePlugin{
+		fetch: func(ctx context.Context, env *plugin.Env, cfg any) (any, error) {
+			return base.Data{User: plugin.UserContext{Login: "octocat"}}, nil
+		},
+		renderFn: func(env *plugin.Env, data any) (plugin.Fragment, error) {
+			panic("base render exploded")
+		},
+	})
+
+	engine := &metrics.Engine{Env: newTestEnv(), Strict: false}
+	frags, err := engine.Render(context.Background(), &config.Config{})
+	require.NoError(t, err, "a recovered base render panic must degrade, not propagate, in non-strict mode")
+	require.Len(t, frags, 1)
+	require.Contains(t, frags[0].Body, "plugin-error")
+	require.Contains(t, frags[0].Body, "base")
+}
+
+func TestEngine_Strict_BaseRenderPanicAbortsCleanly(t *testing.T) {
+	registerFake(t, "base", fakePlugin{
+		fetch: func(ctx context.Context, env *plugin.Env, cfg any) (any, error) {
+			return base.Data{User: plugin.UserContext{Login: "octocat"}}, nil
+		},
+		renderFn: func(env *plugin.Env, data any) (plugin.Fragment, error) {
+			panic("base render exploded")
+		},
+	})
+
+	engine := &metrics.Engine{Env: newTestEnv(), Strict: true}
+	_, err := engine.Render(context.Background(), &config.Config{})
+	require.Error(t, err, "strict mode must return a clean error, not crash, on a base render panic")
+	require.Contains(t, err.Error(), "base")
+	require.Contains(t, err.Error(), "panic")
+}
+
 func TestEngine_Strict_AbortsOnPluginError(t *testing.T) {
 	registerFake(t, "base", fakePlugin{
 		fetch: func(ctx context.Context, env *plugin.Env, cfg any) (any, error) {

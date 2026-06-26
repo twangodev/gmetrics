@@ -88,10 +88,14 @@ func (e *Engine) Render(ctx context.Context, cfg *config.Config) ([]plugin.Fragm
 	}
 
 	if includesSection(cfg.Base.Sections, "metadata") && baseData != nil {
-		if metaFrag, err := e.safeMetadata(baseData); err == nil && metaFrag.Body != "" {
-			frags = append(frags, metaFrag)
-		} else if err != nil {
+		metaFrag, err := e.safeMetadata(baseData)
+		if err != nil {
+			if e.Strict {
+				return nil, fmt.Errorf("metadata render: %w", err)
+			}
 			e.Env.Log.Warn("metadata render failed", "err", err)
+		} else if metaFrag.Body != "" {
+			frags = append(frags, metaFrag)
 		}
 	}
 
@@ -107,33 +111,26 @@ func includesSection(xs []string, s string) bool {
 	return false
 }
 
+func (e *Engine) recoverPanic(errp *error, msg string, fields ...any) {
+	if r := recover(); r != nil {
+		fields = append(fields, "panic", r, "stack", string(debug.Stack()))
+		e.Env.Log.Error(msg, fields...)
+		*errp = fmt.Errorf("panic: %v", r)
+	}
+}
+
 func (e *Engine) safeFetch(ctx context.Context, name string, p plugin.Plugin, cfg any) (data any, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			e.Env.Log.Error("plugin fetch panicked", "plugin", name, "panic", r, "stack", string(debug.Stack()))
-			data, err = nil, fmt.Errorf("panic: %v", r)
-		}
-	}()
+	defer e.recoverPanic(&err, "plugin fetch panicked", "plugin", name)
 	return p.Fetch(ctx, e.Env, cfg)
 }
 
 func (e *Engine) safeRender(name string, p plugin.Plugin, data any) (frag plugin.Fragment, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			e.Env.Log.Error("plugin render panicked", "plugin", name, "panic", r, "stack", string(debug.Stack()))
-			frag, err = plugin.Fragment{}, fmt.Errorf("panic: %v", r)
-		}
-	}()
+	defer e.recoverPanic(&err, "plugin render panicked", "plugin", name)
 	return p.Render(e.Env, data)
 }
 
 func (e *Engine) safeMetadata(data any) (frag plugin.Fragment, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			e.Env.Log.Error("metadata render panicked", "panic", r, "stack", string(debug.Stack()))
-			frag, err = plugin.Fragment{}, fmt.Errorf("panic: %v", r)
-		}
-	}()
+	defer e.recoverPanic(&err, "metadata render panicked")
 	return base.MetadataFragment(data)
 }
 
