@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/twangodev/gmetrics/compare/v1.6.0...v1.7.0) (2026-06-26)
+
+
+### Features
+
+* strict-mode input and panic-resilient plugin rendering ([#21](https://github.com/twangodev/gmetrics/issues/21)) ([76594fb](https://github.com/twangodev/gmetrics/commit/76594fbdd16e135e07c015bbf5acbc21594f3cb5))
+
 ## [1.6.0](https://github.com/twangodev/gmetrics/compare/v1.5.0...v1.6.0) (2026-06-05)
 
 
