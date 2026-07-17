@@ -3,6 +3,7 @@ package base
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -70,8 +71,13 @@ func TestRender_NoSections_EmptyFragment(t *testing.T) {
 func TestFetch_PopulatesUser(t *testing.T) {
 	t.Parallel()
 
+	var (
+		mu          sync.Mutex
+		queryBodies []string
+	)
+
 	// Counts differ per section so a field mis-mapping surfaces as a wrong value.
-	const respBody = `{
+	const profileRespBody = `{
   "data": {
     "user": {
       "login": "alice",
@@ -88,6 +94,13 @@ func TestFetch_PopulatesUser(t *testing.T) {
       "watching": {"totalCount": 8},
       "sponsorshipsAsSponsor": {"totalCount": 1},
       "repositories": {"totalCount": 25, "totalDiskUsage": 9001},
+      "repositoriesContributedTo": {"totalCount": 6}
+    }
+  }
+}`
+	const contributionsRespBody = `{
+  "data": {
+    "user": {
       "contributionsCollection": {
         "totalCommitContributions": 1200,
         "totalPullRequestContributions": 30,
@@ -109,8 +122,20 @@ func TestFetch_PopulatesUser(t *testing.T) {
 }`
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		queryBodies = append(queryBodies, string(body))
+		mu.Unlock()
+
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(respBody))
+		switch {
+		case strings.Contains(string(body), "contributionsCollection"):
+			_, _ = w.Write([]byte(contributionsRespBody))
+		case strings.Contains(string(body), "forkCount"):
+			_, _ = w.Write([]byte(`{"data":{"user":{"repositories":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}`))
+		default:
+			_, _ = w.Write([]byte(profileRespBody))
+		}
 	}))
 	t.Cleanup(srv.Close)
 
@@ -150,6 +175,7 @@ func TestFetch_PopulatesUser(t *testing.T) {
 
 	require.Equal(t, 25, data.Repositories.Count)
 	require.Equal(t, 9001, data.Repositories.Disk)
+	require.Equal(t, 6, data.ContributedTo)
 
 	require.Len(t, data.Calendar, 4)
 	require.Equal(t, "2026-05-19", data.Calendar[0].Date)
@@ -157,6 +183,23 @@ func TestFetch_PopulatesUser(t *testing.T) {
 
 	require.Equal(t, []string{"header", "activity", "community", "repositories", "metadata"}, data.Sections)
 	require.NotEmpty(t, data.Metadata.GeneratedAt)
+
+	mu.Lock()
+	defer mu.Unlock()
+	var profileQueries, contributionQueries int
+	for _, body := range queryBodies {
+		hasProfile := strings.Contains(body, "issueComments")
+		hasContributions := strings.Contains(body, "contributionsCollection")
+		require.False(t, hasProfile && hasContributions, "profile and contributions must not share a GraphQL query: %s", body)
+		if hasProfile {
+			profileQueries++
+		}
+		if hasContributions {
+			contributionQueries++
+		}
+	}
+	require.Equal(t, 1, profileQueries)
+	require.Equal(t, 1, contributionQueries)
 }
 
 // base_hireable tracks GitHub's live "Available for hire" status; it never forces the badge on.
@@ -178,20 +221,25 @@ func TestFetch_Hireable_TracksGitHub(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			respBody := fmt.Sprintf(`{
+			profileRespBody := fmt.Sprintf(`{
   "data": {
     "user": {
       "login": "alice",
       "isHireable": %t,
-      "repositories": {"totalCount": 0, "totalDiskUsage": 0},
-      "contributionsCollection": {"contributionCalendar": {"weeks": []}}
+      "repositories": {"totalCount": 0, "totalDiskUsage": 0}
     }
   }
 }`, tc.githubHireable)
+			const contributionsRespBody = `{"data":{"user":{"contributionsCollection":{"contributionCalendar":{"weeks":[]}}}}}`
 
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(respBody))
+				if strings.Contains(string(body), "contributionsCollection") {
+					_, _ = w.Write([]byte(contributionsRespBody))
+					return
+				}
+				_, _ = w.Write([]byte(profileRespBody))
 			}))
 			t.Cleanup(srv.Close)
 

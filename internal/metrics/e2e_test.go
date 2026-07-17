@@ -56,8 +56,10 @@ func e2eHandler(t *testing.T) http.Handler {
 			_, _ = w.Write([]byte(graphqlFollowingJSON))
 		case strings.Contains(bs, "languages(first"):
 			_, _ = w.Write([]byte(graphqlLanguagesJSON))
+		case strings.Contains(bs, "repositoriesContributedTo"):
+			_, _ = w.Write([]byte(graphqlBaseProfileJSON))
 		case strings.Contains(bs, "contributionsCollection"):
-			_, _ = w.Write([]byte(graphqlBaseUserJSON))
+			_, _ = w.Write([]byte(graphqlBaseContributionsJSON))
 		default:
 			http.Error(w, "graphql: unrecognised query: "+bs, http.StatusBadRequest)
 		}
@@ -228,7 +230,7 @@ func TestE2E_FullPipelineGolden(t *testing.T) {
 	g.Assert(t, "e2e_full", []byte(stripVolatile(svg)))
 }
 
-const graphqlBaseUserJSON = `{
+const graphqlBaseProfileJSON = `{
   "data": {
     "user": {
       "login": "alice",
@@ -244,7 +246,14 @@ const graphqlBaseUserJSON = `{
       "starredRepositories": {"totalCount": 30},
       "watching": {"totalCount": 5},
       "sponsorshipsAsSponsor": {"totalCount": 1},
-      "repositories": {"totalCount": 14, "totalDiskUsage": 1024},
+      "repositories": {"totalCount": 14, "totalDiskUsage": 1024}
+    }
+  }
+}`
+
+const graphqlBaseContributionsJSON = `{
+  "data": {
+    "user": {
       "contributionsCollection": {
         "totalCommitContributions": 200,
         "totalPullRequestContributions": 25,
