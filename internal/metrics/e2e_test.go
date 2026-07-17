@@ -246,7 +246,8 @@ const graphqlBaseProfileJSON = `{
       "starredRepositories": {"totalCount": 30},
       "watching": {"totalCount": 5},
       "sponsorshipsAsSponsor": {"totalCount": 1},
-      "repositories": {"totalCount": 14, "totalDiskUsage": 1024}
+      "repositories": {"totalCount": 14, "totalDiskUsage": 1024},
+      "repositoriesContributedTo": {"totalCount": 6}
     }
   }
 }`
