@@ -15,7 +15,7 @@ import (
 
 var errInvalidData = errors.New("base: render data has unexpected type")
 
-type baseQuery struct {
+type baseProfileQuery struct {
 	User struct {
 		Login      githubv4.String
 		Name       githubv4.String
@@ -56,7 +56,11 @@ type baseQuery struct {
 		RepositoriesContributedTo struct {
 			TotalCount githubv4.Int
 		} `graphql:"repositoriesContributedTo(first: 0, includeUserRepositories: false, contributionTypes: [COMMIT, PULL_REQUEST, ISSUE, REPOSITORY])"`
+	} `graphql:"user(login: $login)"`
+}
 
+type baseContributionsQuery struct {
+	User struct {
 		ContributionsCollection struct {
 			TotalCommitContributions            githubv4.Int
 			TotalPullRequestContributions       githubv4.Int
@@ -107,49 +111,54 @@ func Fetch(ctx context.Context, env *plugin.Env, cfg Config) (Data, error) {
 		"affiliations": affiliations,
 	}
 
-	var q baseQuery
-	if err := env.GraphQL.Query(ctx, &q, vars); err != nil {
-		return d, fmt.Errorf("base: graphql query: %w", err)
+	var profile baseProfileQuery
+	if err := env.GraphQL.Query(ctx, &profile, vars); err != nil {
+		return d, fmt.Errorf("base: profile graphql query: %w", err)
+	}
+
+	var contributions baseContributionsQuery
+	if err := env.GraphQL.Query(ctx, &contributions, map[string]any{"login": githubv4.String(login)}); err != nil {
+		return d, fmt.Errorf("base: contributions graphql query: %w", err)
 	}
 
 	d.User = plugin.UserContext{
-		Login:      string(q.User.Login),
-		Name:       string(q.User.Name),
-		AvatarURL:  string(q.User.AvatarURL),
-		Bio:        string(q.User.Bio),
-		CreatedAt:  q.User.CreatedAt.Time,
-		Followers:  int(q.User.Followers.TotalCount),
-		Following:  int(q.User.Following.TotalCount),
-		DatabaseID: int64(q.User.DatabaseID),
+		Login:      string(profile.User.Login),
+		Name:       string(profile.User.Name),
+		AvatarURL:  string(profile.User.AvatarURL),
+		Bio:        string(profile.User.Bio),
+		CreatedAt:  profile.User.CreatedAt.Time,
+		Followers:  int(profile.User.Followers.TotalCount),
+		Following:  int(profile.User.Following.TotalCount),
+		DatabaseID: int64(profile.User.DatabaseID),
 	}
 	if d.User.Login == "" {
 		d.User.Login = login
 	}
 
-	d.Hireable = cfg.Hireable && bool(q.User.IsHireable)
+	d.Hireable = cfg.Hireable && bool(profile.User.IsHireable)
 
 	d.Activity = Activity{
-		Commits:      int(q.User.ContributionsCollection.TotalCommitContributions),
-		PRsOpened:    int(q.User.ContributionsCollection.TotalPullRequestContributions),
-		PRsReviewed:  int(q.User.ContributionsCollection.TotalPullRequestReviewContributions),
-		IssuesOpened: int(q.User.ContributionsCollection.TotalIssueContributions),
-		Comments:     int(q.User.IssueComments.TotalCount),
+		Commits:      int(contributions.User.ContributionsCollection.TotalCommitContributions),
+		PRsOpened:    int(contributions.User.ContributionsCollection.TotalPullRequestContributions),
+		PRsReviewed:  int(contributions.User.ContributionsCollection.TotalPullRequestReviewContributions),
+		IssuesOpened: int(contributions.User.ContributionsCollection.TotalIssueContributions),
+		Comments:     int(profile.User.IssueComments.TotalCount),
 	}
 
-	d.ContributedTo = int(q.User.RepositoriesContributedTo.TotalCount)
+	d.ContributedTo = int(profile.User.RepositoriesContributedTo.TotalCount)
 
 	d.Community = Community{
-		Orgs:      int(q.User.Organizations.TotalCount),
-		Following: int(q.User.Following.TotalCount),
-		Sponsors:  int(q.User.SponsorshipsAsSponsor.TotalCount),
-		Stars:     int(q.User.StarredRepositories.TotalCount),
-		Watching:  int(q.User.Watching.TotalCount),
+		Orgs:      int(profile.User.Organizations.TotalCount),
+		Following: int(profile.User.Following.TotalCount),
+		Sponsors:  int(profile.User.SponsorshipsAsSponsor.TotalCount),
+		Stars:     int(profile.User.StarredRepositories.TotalCount),
+		Watching:  int(profile.User.Watching.TotalCount),
 	}
 
 	// Packages is left zero: GraphQL does not expose it for arbitrary users (needs a read:packages REST call).
 	d.Repositories = Repositories{
-		Count: int(q.User.Repositories.TotalCount),
-		Disk:  int(q.User.Repositories.TotalDiskUsage),
+		Count: int(profile.User.Repositories.TotalCount),
+		Disk:  int(profile.User.Repositories.TotalDiskUsage),
 	}
 
 	if err := populateRepoStats(ctx, env, cfg, affiliations, login, &d); err != nil {
@@ -159,7 +168,7 @@ func Fetch(ctx context.Context, env *plugin.Env, cfg Config) (Data, error) {
 	}
 
 	if cfg.Indepth {
-		if err := populateIndepthContributions(ctx, env, login, q.User.CreatedAt.Time, &d); err != nil {
+		if err := populateIndepthContributions(ctx, env, login, profile.User.CreatedAt.Time, &d); err != nil {
 			if env.Log != nil {
 				env.Log.Warn("base: indepth contributions aggregation failed", "err", err)
 			}
@@ -174,7 +183,7 @@ func Fetch(ctx context.Context, env *plugin.Env, cfg Config) (Data, error) {
 		}
 	}
 
-	d.Calendar = lastNDays(q, 14)
+	d.Calendar = lastNDays(contributions, 14)
 
 	// Base64-embed the avatar so the SVG is self-contained and survives GitHub's Camo proxy.
 	if env.HTTP != nil && d.User.AvatarURL != "" {
@@ -518,7 +527,7 @@ func buildCommitSearchQuery(entry, login, loginLower string) string {
 	return "author-email:" + entry
 }
 
-func lastNDays(q baseQuery, n int) []DayCount {
+func lastNDays(q baseContributionsQuery, n int) []DayCount {
 	type day struct {
 		date  string
 		count int
