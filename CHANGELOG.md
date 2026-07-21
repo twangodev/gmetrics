@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.7.1](https://github.com/twangodev/gmetrics/compare/v1.7.0...v1.7.1) (2026-07-21)
+
+
+### Bug Fixes
+
+* **base:** split GraphQL query to avoid resource limits ([#24](https://github.com/twangodev/gmetrics/issues/24)) ([b0256b0](https://github.com/twangodev/gmetrics/commit/b0256b03a0649de0a6c7dc672de57b494ec3ec7c))
+* **http:** rate-limit retry attempts ([a5dedaf](https://github.com/twangodev/gmetrics/commit/a5dedafe60d23188e96dae646213fb2859d2b0aa))
+
+
+### Performance Improvements
+
+* **languages:** optimize incremental history scanning ([7dba359](https://github.com/twangodev/gmetrics/commit/7dba359e16744fd9e4924798b95719b0028d69bf))
+
 ## [1.7.0](https://github.com/twangodev/gmetrics/compare/v1.6.0...v1.7.0) (2026-06-26)
 
 
