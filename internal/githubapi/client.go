@@ -36,6 +36,7 @@ func New(ctx context.Context, cfg Config) (*Clients, error) {
 				Source: ts,
 				Base:   rateLimitedTransport(cfg.HTTPClient.Transport),
 			},
+			Timeout: cfg.HTTPClient.Timeout,
 		}
 	} else {
 		httpClient = &http.Client{

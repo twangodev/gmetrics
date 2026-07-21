@@ -12,17 +12,36 @@ import (
 )
 
 type Config struct {
-	MaxRetries    int
-	RetryWait     time.Duration
-	RatePerSecond float64
-	Burst         int
-	UserAgent     string
+	MaxRetries     int
+	RetryWait      time.Duration
+	RequestTimeout time.Duration
+	RatePerSecond  float64
+	Burst          int
+	UserAgent      string
 }
 
 type Client struct {
 	httpClient *http.Client
-	limiter    *rate.Limiter
-	userAgent  string
+}
+
+type requestTransport struct {
+	base      http.RoundTripper
+	limiter   *rate.Limiter
+	userAgent string
+}
+
+func (t *requestTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if t.limiter != nil {
+		if err := t.limiter.Wait(req.Context()); err != nil {
+			return nil, err
+		}
+	}
+	if t.userAgent != "" && req.Header.Get("User-Agent") == "" {
+		req = req.Clone(req.Context())
+		req.Header = req.Header.Clone()
+		req.Header.Set("User-Agent", t.userAgent)
+	}
+	return t.base.RoundTrip(req)
 }
 
 const (
@@ -42,20 +61,29 @@ func New(cfg Config) *Client {
 		retryClient.RetryWaitMax = cfg.RetryWait * maxBackoffMultiplier
 	}
 
-	c := &Client{
-		httpClient: retryClient.StandardClient(),
-		userAgent:  cfg.UserAgent,
-	}
-
+	var limiter *rate.Limiter
 	if cfg.RatePerSecond > 0 {
 		burst := cfg.Burst
 		if burst <= 0 {
 			burst = defaultBurst
 		}
-		c.limiter = rate.NewLimiter(rate.Limit(cfg.RatePerSecond), burst)
+		limiter = rate.NewLimiter(rate.Limit(cfg.RatePerSecond), burst)
 	}
 
-	return c
+	// Wrap retryablehttp's underlying client so every attempt, including retries,
+	// consumes a limiter token and receives the configured user agent.
+	baseTransport := retryClient.HTTPClient.Transport
+	if baseTransport == nil {
+		baseTransport = http.DefaultTransport
+	}
+	retryClient.HTTPClient.Transport = &requestTransport{
+		base:      baseTransport,
+		limiter:   limiter,
+		userAgent: cfg.UserAgent,
+	}
+	httpClient := retryClient.StandardClient()
+	httpClient.Timeout = cfg.RequestTimeout
+	return &Client{httpClient: httpClient}
 }
 
 func (c *Client) HTTPClient() *http.Client {
@@ -67,18 +95,9 @@ func (c *Client) Get(url string) (*http.Response, error) {
 }
 
 func (c *Client) Do(ctx context.Context, method, url string, body io.Reader) (*http.Response, error) {
-	if c.limiter != nil {
-		if err := c.limiter.Wait(ctx); err != nil {
-			return nil, err
-		}
-	}
-
 	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
 		return nil, err
-	}
-	if c.userAgent != "" {
-		req.Header.Set("User-Agent", c.userAgent)
 	}
 	return c.httpClient.Do(req)
 }

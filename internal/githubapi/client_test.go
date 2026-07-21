@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -14,6 +15,16 @@ func TestNew_RejectsMissingToken(t *testing.T) {
 	_, err := New(context.Background(), Config{})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "token required")
+}
+
+func TestNewPreservesHTTPClientTimeout(t *testing.T) {
+	const timeout = 37 * time.Second
+	clients, err := New(context.Background(), Config{
+		Token:      "test-token",
+		HTTPClient: &http.Client{Timeout: timeout},
+	})
+	require.NoError(t, err)
+	require.Equal(t, timeout, clients.REST.Client().Timeout)
 }
 
 func TestNew_AuthHeaderIsSet(t *testing.T) {
