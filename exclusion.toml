@@ -1,0 +1,11 @@
+# Paths that should not contribute to in-depth authored-language totals.
+# These are imported, generated, or bundled assets rather than project source.
+exclude = [
+  "**/editor/static/**",
+  "**/node_modules/**",
+  "**/vendor/**",
+  "**/dist/**",
+  "**/build/**",
+  "**/*.min.js",
+  "**/*.min.css",
+]

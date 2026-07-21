@@ -20,3 +20,7 @@ A Go port of [lowlighter/metrics](https://github.com/lowlighter/metrics) for the
 When `plugin_languages_indepth` is enabled the action caches per-repo language
 stats across runs automatically, so each run only processes commits added since
 the previous one. No extra workflow steps are required.
+
+In-depth language totals use the repository-root `exclusion.toml` file to omit
+imported or generated assets. Set `GMETRICS_EXCLUSION_PATH` to use a different
+file; the default template excludes common bundles and dependency trees.

@@ -1003,7 +1003,7 @@ func readNULToken(r *bufio.Reader) (string, error) {
 }
 
 func eligibleCodePath(path string) bool {
-	if path == "" || enry.IsVendor(path) || enry.IsDocumentation(path) || enry.IsGenerated(path, nil) {
+	if path == "" || excludedPath(path) || enry.IsVendor(path) || enry.IsDocumentation(path) || enry.IsGenerated(path, nil) {
 		return false
 	}
 	lang := classifyPath(path)
@@ -1038,7 +1038,7 @@ func classifyNumstatLine(line string) (string, int, bool) {
 	if i := strings.LastIndex(path, "=> "); i >= 0 {
 		path = strings.TrimRight(path[i+3:], "}")
 	}
-	if enry.IsVendor(path) || enry.IsDocumentation(path) || enry.IsGenerated(path, nil) {
+	if excludedPath(path) || enry.IsVendor(path) || enry.IsDocumentation(path) || enry.IsGenerated(path, nil) {
 		return "", 0, false
 	}
 	lang := classifyPath(path)
@@ -1378,7 +1378,7 @@ func accumulateCommit(res *walkResult, files []*github.CommitFile) {
 		if added <= 0 || path == "" {
 			continue
 		}
-		if enry.IsVendor(path) || enry.IsDocumentation(path) || enry.IsGenerated(path, nil) {
+		if excludedPath(path) || enry.IsVendor(path) || enry.IsDocumentation(path) || enry.IsGenerated(path, nil) {
 			continue
 		}
 		lang := classifyPath(path)

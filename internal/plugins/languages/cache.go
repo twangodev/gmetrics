@@ -13,7 +13,7 @@ import (
 // cacheVersion tracks both the on-disk schema and authorship computation
 // semantics. Increment it whenever a cached repository could produce different
 // totals under the current scanner.
-const cacheVersion = 2
+const cacheVersion = 3
 
 type repoEntry struct {
 	HeadSHA  string         `json:"headSHA"`

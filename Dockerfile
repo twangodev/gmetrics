@@ -24,6 +24,7 @@ RUN CGO_ENABLED=0 GOFLAGS="-trimpath" \
 FROM alpine:3.23
 RUN apk add --no-cache ca-certificates git
 COPY --from=builder /out/gmetrics /usr/local/bin/gmetrics
+COPY exclusion.toml /usr/local/share/gmetrics/exclusion.toml
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh"]

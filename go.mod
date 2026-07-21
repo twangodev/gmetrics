@@ -4,6 +4,7 @@ go 1.26
 
 require (
 	github.com/go-enry/go-enry/v2 v2.9.6
+	github.com/BurntSushi/toml v1.6.0
 	github.com/gofri/go-github-ratelimit/v2 v2.0.2
 	github.com/gogs/git-module v1.8.7
 	github.com/google/go-github/v66 v66.0.0
