@@ -37,7 +37,7 @@ inputs:
     description: Comma-separated email/login aliases for commit authorship attribution
     required: false
   repositories:
-    description: Max repos to fetch
+    description: Max repositories to fetch after deduplicating affiliated and contributed repositories
     required: false
     default: '100'
   repositories_batch:

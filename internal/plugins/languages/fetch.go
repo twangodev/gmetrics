@@ -55,12 +55,14 @@ func fetchGraphQL(ctx context.Context, env *plugin.Env, cfg Config) (Data, error
 
 	vars := map[string]any{
 		"login":        githubv4.String(login),
-		"first":        githubv4.Int(cfg.RepoBatch),
+		"first":        githubv4.Int(min(cfg.RepoBatch, cfg.RepoMax, 100)),
 		"cursor":       (*githubv4.String)(nil),
 		"affiliations": affiliations,
 	}
 
 	remainingHops := maxPaginationHops
+	repositories := 0
+	complete := false
 	for remainingHops > 0 {
 		remainingHops--
 		var q repoLangsQuery
@@ -68,9 +70,13 @@ func fetchGraphQL(ctx context.Context, env *plugin.Env, cfg Config) (Data, error
 			return Data{}, fmt.Errorf("languages: fetch graphql: %w", err)
 		}
 		for _, repo := range q.User.Repositories.Nodes {
+			if repositories >= cfg.RepoMax {
+				break
+			}
 			if bool(repo.IsFork) {
 				continue
 			}
+			repositories++
 			for _, edge := range repo.Languages.Edges {
 				name := string(edge.Node.Name)
 				bytes[name] += int(edge.Size)
@@ -81,10 +87,15 @@ func fetchGraphQL(ctx context.Context, env *plugin.Env, cfg Config) (Data, error
 				}
 			}
 		}
-		if !bool(q.User.Repositories.PageInfo.HasNextPage) {
+		if repositories >= cfg.RepoMax || !bool(q.User.Repositories.PageInfo.HasNextPage) {
+			complete = true
 			break
 		}
 		vars["cursor"] = githubv4.NewString(q.User.Repositories.PageInfo.EndCursor)
+		vars["first"] = githubv4.Int(min(cfg.RepoBatch, cfg.RepoMax-repositories, 100))
+	}
+	if !complete {
+		return Data{}, fmt.Errorf("languages: repository pagination exceeded %d pages", maxPaginationHops)
 	}
 
 	return assemble(cfg, bytes, colors, false), nil

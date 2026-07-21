@@ -10,6 +10,7 @@ type Config struct {
 	Other            bool     `koanf:"other"`
 	Indepth          bool     `koanf:"indepth"`
 	RepoBatch        int      `koanf:"repo_batch"`
+	RepoMax          int      `koanf:"repo_max"`
 	RepoAffiliations []string `koanf:"repo_affiliations"`
 	// CommitsAuthoring is consulted only by the indepth path; the GraphQL path relies on GitHub's per-repo aggregates.
 	CommitsAuthoring []string `koanf:"commits_authoring"`
@@ -25,6 +26,7 @@ func defaultConfig() Config {
 		Other:            false,
 		Indepth:          false,
 		RepoBatch:        50,
+		RepoMax:          100,
 		RepoAffiliations: []string{"owner"},
 	}
 }
@@ -35,6 +37,16 @@ func (c Config) validate() error {
 	}
 	if c.RepoBatch <= 0 {
 		return fmt.Errorf("languages: repo_batch must be > 0")
+	}
+	if c.RepoMax < 0 {
+		return fmt.Errorf("languages: repo_max must be >= 0")
+	}
+	for _, affiliation := range c.RepoAffiliations {
+		switch affiliation {
+		case "owner", "collaborator", "organization_member":
+		default:
+			return fmt.Errorf("languages: unsupported repository affiliation %q", affiliation)
+		}
 	}
 	if len(c.Sections) == 0 {
 		return fmt.Errorf("languages: sections must not be empty")

@@ -10,7 +10,10 @@ import (
 	"strings"
 )
 
-const cacheVersion = 1
+// cacheVersion tracks both the on-disk schema and authorship computation
+// semantics. Increment it whenever a cached repository could produce different
+// totals under the current scanner.
+const cacheVersion = 2
 
 type repoEntry struct {
 	HeadSHA  string         `json:"headSHA"`
@@ -58,7 +61,24 @@ func saveCache(path string, c *cacheFile) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".languages-indepth-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
 }
 
 func (c *cacheFile) prune(seen map[string]struct{}) {
@@ -67,6 +87,27 @@ func (c *cacheFile) prune(seen map[string]struct{}) {
 			delete(c.Repos, k)
 		}
 	}
+}
+
+func (c *cacheFile) clone() *cacheFile {
+	cloned := &cacheFile{
+		Version:  c.Version,
+		PredHash: c.PredHash,
+		Repos:    make(map[string]repoEntry, len(c.Repos)),
+	}
+	for name, entry := range c.Repos {
+		entry.Bytes = cloneLanguageBytes(entry.Bytes)
+		cloned.Repos[name] = entry
+	}
+	return cloned
+}
+
+func cloneLanguageBytes(in map[string]int) map[string]int {
+	out := make(map[string]int, len(in))
+	for language, count := range in {
+		out[language] = count
+	}
+	return out
 }
 
 func predHash(preds []string) string {

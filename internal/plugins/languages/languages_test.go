@@ -125,6 +125,46 @@ func TestFetch_NonIndepth_AggregatesAndFilters(t *testing.T) {
 	require.Equal(t, "#3178c6", data.Langs[1].Color)
 }
 
+func TestFetch_NonIndepth_EnforcesRepoMax(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/graphql", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{"user": map[string]any{"repositories": map[string]any{
+				"nodes": []any{
+					map[string]any{
+						"nameWithOwner": "alice/first", "isFork": false,
+						"languages": map[string]any{"edges": []any{
+							map[string]any{"size": 10, "node": map[string]any{"name": "Go", "color": "#00ADD8"}},
+						}},
+					},
+					map[string]any{
+						"nameWithOwner": "alice/second", "isFork": false,
+						"languages": map[string]any{"edges": []any{
+							map[string]any{"size": 20, "node": map[string]any{"name": "Rust", "color": "#dea584"}},
+						}},
+					},
+				},
+				"pageInfo": map[string]any{"endCursor": "", "hasNextPage": false},
+			}}},
+		})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	cfg := defaultConfig()
+	cfg.RepoMax = 1
+	raw, err := (&Plugin{}).Fetch(context.Background(), &plugin.Env{
+		Login:   "alice",
+		GraphQL: githubv4.NewEnterpriseClient(srv.URL+"/graphql", srv.Client()),
+	}, cfg)
+	require.NoError(t, err)
+	data := raw.(Data)
+	require.Equal(t, 10, data.Total)
+	require.Len(t, data.Langs, 1)
+	require.Equal(t, "Go", data.Langs[0].Name)
+}
+
 func TestIsIgnored_CaseInsensitive(t *testing.T) {
 	t.Parallel()
 

@@ -21,7 +21,7 @@ RUN CGO_ENABLED=0 GOFLAGS="-trimpath" \
 # gcr.io/distroless/static-debian12:nonroot, but distroless has no shell, so
 # the #!/bin/sh entrypoint cannot execute there. Alpine keeps the final image
 # small (~10MB base) while supporting the shell entrypoint contract.
-FROM alpine:3.20
+FROM alpine:3.23
 RUN apk add --no-cache ca-certificates git
 COPY --from=builder /out/gmetrics /usr/local/bin/gmetrics
 COPY entrypoint.sh /entrypoint.sh

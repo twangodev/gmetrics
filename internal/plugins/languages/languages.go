@@ -70,6 +70,13 @@ func (*Plugin) DecodeConfig(raw map[string]any) (any, error) {
 		}
 		cfg.RepoBatch = n
 	}
+	if v, ok := raw["repo_max"]; ok {
+		n, err := toInt(v)
+		if err != nil {
+			return nil, fmt.Errorf("languages: repo_max: %w", err)
+		}
+		cfg.RepoMax = n
+	}
 	if v, ok := raw["repo_affiliations"]; ok {
 		ts, err := toStringSlice(v)
 		if err != nil {
@@ -80,6 +87,9 @@ func (*Plugin) DecodeConfig(raw map[string]any) (any, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
+	if cfg.RepoMax == 0 {
+		cfg.RepoMax = defaultConfig().RepoMax
+	}
 	return cfg, nil
 }
 
@@ -87,6 +97,9 @@ func (*Plugin) Fetch(ctx context.Context, env *plugin.Env, raw any) (any, error)
 	cfg, ok := raw.(Config)
 	if !ok {
 		cfg = defaultConfig()
+	}
+	if cfg.RepoMax == 0 {
+		cfg.RepoMax = defaultConfig().RepoMax
 	}
 	if err := cfg.validate(); err != nil {
 		return nil, err

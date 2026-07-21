@@ -207,6 +207,7 @@ func assembleRuns(cfg *config.Config, env *plugin.Env) []pluginRun {
 					Indepth:          lc.Indepth,
 					IndepthCachePath: cachePath,
 					RepoBatch:        cfg.Base.Repositories.Batch,
+					RepoMax:          cfg.Base.Repositories.Max,
 					RepoAffiliations: cfg.Base.Repositories.Affiliations,
 					CommitsAuthoring: cfg.Base.CommitsAuthoring,
 				},
