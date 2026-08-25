@@ -15,7 +15,7 @@ type Config struct {
 func defaultConfig() Config {
 	return Config{
 		Types: []string{"followers", "following"},
-		Limit: 24,
+		Limit: 40,
 		Size:  28,
 	}
 }

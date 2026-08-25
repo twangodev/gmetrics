@@ -3,6 +3,7 @@ package people_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -48,12 +49,58 @@ func TestRender_TwoSections(t *testing.T) {
 	require.Contains(t, frag.Body, `data-type="followers"`)
 	require.Contains(t, frag.Body, `data-type="following"`)
 
-	const totalPeople = 5
-	require.Equal(t, totalPeople, strings.Count(frag.Body, "<circle"))
+	const totalPeopleAndOverflowMarkers = 7
+	require.Equal(t, totalPeopleAndOverflowMarkers, strings.Count(frag.Body, "<circle"))
+	require.Contains(t, frag.Body, `data-overflow="1231"`)
+	require.Contains(t, frag.Body, `data-overflow="40"`)
 
 	// Section headers are rendered as text-as-path glyphs, so assert one header <path> per section rather than grepping header text.
 	const sectionCount = 2
 	require.GreaterOrEqual(t, strings.Count(frag.Body, "<path"), sectionCount)
+}
+
+func TestRender_SquashesFortyPeopleIntoTwoRows(t *testing.T) {
+	peopleList := make([]people.Person, 40)
+	for i := range peopleList {
+		peopleList[i] = people.Person{Login: fmt.Sprintf("person-%02d", i)}
+	}
+
+	frag, err := (&people.Plugin{}).Render(nil, people.Data{
+		Size: 28,
+		Sections: []people.Section{{
+			Type:   "followers",
+			Total:  40,
+			People: peopleList,
+		}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 80, frag.Height)
+	require.Equal(t, 40, strings.Count(frag.Body, `<circle`))
+	require.Equal(t, 40, strings.Count(frag.Body, `r="9"`))
+	require.NotContains(t, frag.Body, `people-overflow`)
+}
+
+func TestRender_UsesFinalSlotForOverflow(t *testing.T) {
+	peopleList := make([]people.Person, 40)
+	for i := range peopleList {
+		peopleList[i] = people.Person{Login: fmt.Sprintf("person-%02d", i)}
+	}
+
+	frag, err := (&people.Plugin{}).Render(nil, people.Data{
+		Size: 28,
+		Sections: []people.Section{{
+			Type:   "followers",
+			Total:  50,
+			People: peopleList,
+		}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 80, frag.Height)
+	require.Equal(t, 40, strings.Count(frag.Body, `<circle`))
+	require.Contains(t, frag.Body, `data-overflow="11"`)
+	require.Contains(t, frag.Body, `<title>11 more</title>`)
+	require.Contains(t, frag.Body, `<title>person-38</title>`)
+	require.NotContains(t, frag.Body, `<title>person-39</title>`)
 }
 
 func TestFetch_FollowersAndFollowing_Counts(t *testing.T) {

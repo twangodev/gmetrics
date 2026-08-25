@@ -42,7 +42,7 @@ func TestLoad_DefaultsApply(t *testing.T) {
 	require.Equal(t, "none", cfg.Output.Action)
 	require.Equal(t, 100, cfg.Base.Repositories.Max)
 	require.Equal(t, []string{"owner"}, cfg.Base.Repositories.Affiliations)
-	require.Equal(t, 24, cfg.Plugins.People.Limit)
+	require.Equal(t, 40, cfg.Plugins.People.Limit)
 	require.Equal(t, "https://wakatime.com", cfg.Plugins.Wakatime.URL)
 	require.Equal(t, "current", cfg.Plugins.Wakatime.User)
 	require.Equal(t, 7, cfg.Plugins.Wakatime.Days)

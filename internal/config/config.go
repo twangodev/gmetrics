@@ -123,7 +123,7 @@ plugins:
   people:
     enabled: false
     types: [followers, following]
-    limit: 24
+    limit: 40
     size: 28
   wakatime:
     enabled: false

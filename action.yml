@@ -89,9 +89,9 @@ inputs:
     required: false
     default: 'followers, following'
   plugin_people_limit:
-    description: Max people per type
+    description: Max people fetched per type
     required: false
-    default: '24'
+    default: '40'
   plugin_people_size:
     description: Avatar size in pixels
     required: false
