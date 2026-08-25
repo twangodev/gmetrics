@@ -1,7 +1,8 @@
 package people
 
 type Person struct {
-	Login string
+	Login          string
+	IsOrganization bool
 	// Empty when the avatar fetch was skipped; Render draws a placeholder.
 	AvatarB64 string
 }

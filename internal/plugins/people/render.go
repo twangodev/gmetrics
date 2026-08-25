@@ -161,23 +161,40 @@ func slotPosition(i, cellSize, cols int) (int, int) {
 }
 
 func writeAvatar(buf *bytes.Buffer, p Person, x, y, size int) {
-	cx := x + size/2
-	cy := y + size/2
-	r := size / 2
+	accountType := "user"
+	if p.IsOrganization {
+		accountType = "organization"
+	}
 	if p.AvatarB64 != "" {
 		// Per-avatar <clipPath> with a unique id: renderers like resvg/librsvg
 		// don't support the inline `clip-path: circle()` shorthand.
 		clipID := fmt.Sprintf("avatar-clip-%s-%d-%d", p.Login, x, y)
+		fmt.Fprintf(buf, `<defs><clipPath id="%s">`, clipID)
+		writeAvatarShape(buf, p.IsOrganization, x, y, size, "")
 		fmt.Fprintf(buf,
-			`<defs><clipPath id="%s"><circle cx="%d" cy="%d" r="%d"/></clipPath></defs><image x="%d" y="%d" width="%d" height="%d" href="%s" clip-path="url(#%s)" preserveAspectRatio="xMidYMid slice"><title>%s</title></image>`,
-			clipID, cx, cy, r, x, y, size, size, xmlEscapeAttr(p.AvatarB64), clipID, xmlEscape(p.Login),
+			`</clipPath></defs><image data-account-type="%s" x="%d" y="%d" width="%d" height="%d" href="%s" clip-path="url(#%s)" preserveAspectRatio="xMidYMid slice"><title>%s</title></image>`,
+			accountType, x, y, size, size, xmlEscapeAttr(p.AvatarB64), clipID, xmlEscape(p.Login),
 		)
 		return
 	}
-	fmt.Fprintf(buf,
-		`<circle cx="%d" cy="%d" r="%d" fill="#d0d7de"><title>%s</title></circle>`,
-		cx, cy, r, xmlEscape(p.Login),
-	)
+	fmt.Fprintf(buf, `<g data-account-type="%s"><title>%s</title>`, accountType, xmlEscape(p.Login))
+	writeAvatarShape(buf, p.IsOrganization, x, y, size, ` fill="#d0d7de"`)
+	fmt.Fprint(buf, `</g>`)
+}
+
+func writeAvatarShape(buf *bytes.Buffer, organization bool, x, y, size int, attrs string) {
+	if organization {
+		cornerRadius := size / 6
+		if cornerRadius < 2 {
+			cornerRadius = 2
+		}
+		fmt.Fprintf(buf,
+			`<rect x="%d" y="%d" width="%d" height="%d" rx="%d" ry="%d"%s/>`,
+			x, y, size, size, cornerRadius, cornerRadius, attrs,
+		)
+		return
+	}
+	fmt.Fprintf(buf, `<circle cx="%d" cy="%d" r="%d"%s/>`, x+size/2, y+size/2, size/2, attrs)
 }
 
 func writeOverflow(buf *bytes.Buffer, hidden, x, y, size int) error {

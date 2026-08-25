@@ -91,6 +91,18 @@ func e2eHandler(t *testing.T) http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(rateLimitJSON))
 	})
+	mux.HandleFunc("/users/alice", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"login":"alice","followers":12,"following":7}`))
+	})
+	mux.HandleFunc("/users/alice/followers", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"login":"bob","type":"User","avatar_url":"https://avatars.example/bob.png"},{"login":"carol","type":"User","avatar_url":"https://avatars.example/carol.png"}]`))
+	})
+	mux.HandleFunc("/users/alice/following", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"login":"acme","type":"Organization","avatar_url":"https://avatars.example/acme.png"},{"login":"dave","type":"User","avatar_url":"https://avatars.example/dave.png"}]`))
+	})
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("method") == "user.getrecenttracks" {
