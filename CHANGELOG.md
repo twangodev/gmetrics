@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.8.0](https://github.com/twangodev/gmetrics/compare/v1.7.1...v1.8.0) (2026-09-05)
+
+
+### Features
+
+* **people:** distinguish organization avatars ([7ea0627](https://github.com/twangodev/gmetrics/commit/7ea06275fb83e0d2ff1e37cfbbfcf672b0721233))
+* **people:** fit up to 40 avatars in two rows ([ebc1f67](https://github.com/twangodev/gmetrics/commit/ebc1f678fd93fe899802d982cae18dab12fc897c))
+
+
+### Bug Fixes
+
+* **action:** match container versions to published action refs ([a631b32](https://github.com/twangodev/gmetrics/commit/a631b32960693fec8b89744b17505c5194801eba))
+* **languages:** exclude imported assets from authorship totals ([972a3bb](https://github.com/twangodev/gmetrics/commit/972a3bb3e4910fceab52a3366771ac13b18626f1))
+
 ## [1.7.1](https://github.com/twangodev/gmetrics/compare/v1.7.0...v1.7.1) (2026-07-21)
 
 
