@@ -177,9 +177,23 @@ runs:
         path: .gmetrics-cache
         key: gmetrics-languages-${{ github.run_id }}
         restore-keys: gmetrics-languages-
-    - uses: docker://ghcr.io/twangodev/gmetrics:latest
+    - name: Run gmetrics
+      shell: bash
       env:
+        GMETRICS_IMAGE_TAG: ${{ github.action_ref }}
         GMETRICS_INPUTS: ${{ toJSON(inputs) }}
+      run: |
+        if [[ "$GMETRICS_IMAGE_TAG" != main && ! "$GMETRICS_IMAGE_TAG" =~ ^v[0-9]+(\.[0-9]+\.[0-9]+)?$ && ! "$GMETRICS_IMAGE_TAG" =~ ^[0-9a-f]{40}$ ]]; then
+          echo "::error::Use a published v<major> or v<major>.<minor>.<patch> tag, main, or a full SHA published from main"
+          exit 1
+        fi
+
+        docker run --rm --pull=always \
+          --env CI=true \
+          --env GMETRICS_INPUTS \
+          --volume "$GITHUB_WORKSPACE:/github/workspace" \
+          --workdir /github/workspace \
+          "ghcr.io/twangodev/gmetrics:${GMETRICS_IMAGE_TAG}"
 
 branding:
   icon: bar-chart-2

@@ -131,6 +131,9 @@ jobs:
           images: ghcr.io/${{ github.repository }}
           tags: |
             type=raw,value=latest
+            type=raw,value=main
+            type=sha,format=long,prefix=
+            type=semver,pattern={{raw}},value=${{ needs.release-please.outputs.tag_name }},enable=${{ needs.release-please.outputs.release_created == 'true' }}
             type=semver,pattern={{version}},value=${{ needs.release-please.outputs.tag_name }},enable=${{ needs.release-please.outputs.release_created == 'true' }}
             type=semver,pattern=v{{major}},value=${{ needs.release-please.outputs.tag_name }},enable=${{ needs.release-please.outputs.release_created == 'true' }}
 
@@ -141,3 +144,30 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  update-action-major-tag:
+    needs: [release-please, docker-publish]
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Move major action tag to the published release
+        env:
+          RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Unexpected release tag: $RELEASE_TAG" >&2
+            exit 1
+          fi
+
+          major_tag="${RELEASE_TAG%%.*}"
+          release_sha="$(git rev-list -n 1 "$RELEASE_TAG")"
+          remote_major_sha="$(git ls-remote --refs origin "refs/tags/$major_tag" | awk '{print $1}')"
+          git tag --force "$major_tag" "$release_sha"
+          git push --force-with-lease="refs/tags/$major_tag:$remote_major_sha" \
+            origin "refs/tags/$major_tag"
