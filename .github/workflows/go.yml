@@ -19,6 +19,12 @@ jobs:
       - run: go test ./... -race
       - run: go vet ./...
       - run: go build ./...
+      - name: Build action smoke-test image
+        run: docker build --tag gmetrics-action-test .
+      - name: Check action container startup
+        run: go test . -run TestActionContainer -v
+        env:
+          GMETRICS_TEST_IMAGE: gmetrics-action-test
 
   build:
     runs-on: ubuntu-latest
