@@ -17,14 +17,8 @@ A Go port of [lowlighter/metrics](https://github.com/lowlighter/metrics) for the
     plugin_languages_indepth: 'yes'
 ```
 
-The `v1` tag follows the latest compatible v1 release. The action runs the
-container tagged with the requested ref: `v1`, a full release tag such as
-`v1.8.0`, `main`, or a full commit SHA successfully published from `main`.
-Other branches, abbreviated SHAs, and local-path usage are unsupported.
-Matching images must exist before use; older releases and commits are not
-backfilled by this workflow. Pin a full published commit SHA to fix the action
-source version; container tags are not digest pins. Running the action requires
-a Linux runner with Docker.
+Use `@v1` for the latest compatible release, or a release tag/full commit SHA
+with a published matching image. Requires a Linux runner with Docker.
 
 When `plugin_languages_indepth` is enabled the action caches per-repo language
 stats across runs automatically, so each run only processes commits added since
