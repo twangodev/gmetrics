@@ -10,15 +10,13 @@ type Player struct {
 }
 
 type Game struct {
-	AppID   int
-	Name    string
-	IconB64 string
-	// PlaytimeHours is lifetime playtime for MostPlayed and last-two-weeks for Recently, from the minutes Steam reports.
-	PlaytimeHours  float64
-	LastPlayed     string
-	PercentOfTotal float64
-	Platform       string
-	// AchUnlocked and AchTotal are meaningful only when HasAchievements is true.
+	AppID           int
+	Name            string
+	IconB64         string
+	LifetimeHours   float64
+	LastPlayed      string
+	PercentOfTotal  float64
+	Platform        string
 	HasAchievements bool
 	AchUnlocked     int
 	AchTotal        int

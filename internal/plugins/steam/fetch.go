@@ -15,7 +15,6 @@ import (
 	"github.com/twangodev/gmetrics/internal/plugin"
 )
 
-// Steam reports all playtime values in minutes.
 const minutesPerHour = 60.0
 
 const defaultGamesLimit = 1
@@ -105,70 +104,76 @@ func FetchWith(ctx context.Context, hc *http.Client, env *plugin.Env, cfg Config
 	for _, g := range owned.Response.Games {
 		totalMins += g.PlaytimeForever
 	}
-	data.Player.TotalHours = float64(totalMins) / minutesPerHour
+	data.Player.TotalHours = hours(totalMins)
 
-	// No separate games_limit in the workflow, so MostPlayed reuses RecentGamesLimit.
 	byPlaytimeDesc := make([]ownedGame, len(owned.Response.Games))
 	copy(byPlaytimeDesc, owned.Response.Games)
 	sort.Slice(byPlaytimeDesc, func(i, j int) bool {
 		return byPlaytimeDesc[i].PlaytimeForever > byPlaytimeDesc[j].PlaytimeForever
 	})
-	limit := cfg.RecentGamesLimit
-	if limit <= 0 {
-		limit = defaultGamesLimit
-	}
-	if limit > len(byPlaytimeDesc) {
-		limit = len(byPlaytimeDesc)
-	}
+	limit := capLimit(cfg.RecentGamesLimit, len(byPlaytimeDesc))
 	for i := 0; i < limit; i++ {
 		g := byPlaytimeDesc[i]
 		data.MostPlayed = append(data.MostPlayed, Game{
 			AppID:          g.AppID,
 			Name:           g.Name,
 			IconB64:        fetchIcon(ctx, env, g.AppID, g.ImgIconURL),
-			PlaytimeHours:  float64(g.PlaytimeForever) / minutesPerHour,
+			LifetimeHours:  hours(g.PlaytimeForever),
 			LastPlayed:     formatLastPlayed(g.RtimeLastPlayed),
 			PercentOfTotal: shareOfTotal(g.PlaytimeForever, totalMins),
 			Platform:       dominantPlatform(g.PlaytimeWindows, g.PlaytimeMac, g.PlaytimeLinux, g.PlaytimeDeck),
 		})
 	}
 
-	// The recent endpoint omits rtime_last_played and lifetime playtime; join owned games by appid to recover them.
-	ownedByID := make(map[int]ownedGame, len(owned.Response.Games))
-	for _, g := range owned.Response.Games {
-		ownedByID[g.AppID] = g
-	}
-	rlimit := cfg.RecentGamesLimit
-	if rlimit <= 0 {
-		rlimit = defaultGamesLimit
-	}
-	if rlimit > len(recent.Response.Games) {
-		rlimit = len(recent.Response.Games)
-	}
+	ownedByID := indexByAppID(owned.Response.Games)
+	rlimit := capLimit(cfg.RecentGamesLimit, len(recent.Response.Games))
 	for i := 0; i < rlimit; i++ {
 		g := recent.Response.Games[i]
-		game := Game{
-			AppID:         g.AppID,
-			Name:          g.Name,
-			IconB64:       fetchIcon(ctx, env, g.AppID, g.ImgIconURL),
-			PlaytimeHours: float64(g.Playtime2Weeks) / minutesPerHour,
-			Platform:      dominantPlatform(g.PlaytimeWindows, g.PlaytimeMac, g.PlaytimeLinux, g.PlaytimeDeck),
-		}
-		forever := g.PlaytimeForever
-		if o, ok := ownedByID[g.AppID]; ok {
-			game.LastPlayed = formatLastPlayed(o.RtimeLastPlayed)
-			if forever == 0 {
-				forever = o.PlaytimeForever
-			}
-		}
-		game.PercentOfTotal = shareOfTotal(forever, totalMins)
-		data.Recently = append(data.Recently, game)
+		mins := lifetimeMinutes(g, ownedByID)
+		data.Recently = append(data.Recently, Game{
+			AppID:          g.AppID,
+			Name:           g.Name,
+			IconB64:        fetchIcon(ctx, env, g.AppID, g.ImgIconURL),
+			LifetimeHours:  hours(mins),
+			LastPlayed:     formatLastPlayed(ownedByID[g.AppID].RtimeLastPlayed),
+			PercentOfTotal: shareOfTotal(mins, totalMins),
+			Platform:       dominantPlatform(g.PlaytimeWindows, g.PlaytimeMac, g.PlaytimeLinux, g.PlaytimeDeck),
+		})
 	}
 
 	enrichAchievements(ctx, hc, env, cfg, data.MostPlayed)
 	enrichAchievements(ctx, hc, env, cfg, data.Recently)
 
 	return data, nil
+}
+
+func hours(minutes int) float64 {
+	return float64(minutes) / minutesPerHour
+}
+
+func capLimit(n, size int) int {
+	if n <= 0 {
+		n = defaultGamesLimit
+	}
+	if n > size {
+		return size
+	}
+	return n
+}
+
+func indexByAppID(games []ownedGame) map[int]ownedGame {
+	m := make(map[int]ownedGame, len(games))
+	for _, g := range games {
+		m[g.AppID] = g
+	}
+	return m
+}
+
+func lifetimeMinutes(recent recentGame, owned map[int]ownedGame) int {
+	if recent.PlaytimeForever > 0 {
+		return recent.PlaytimeForever
+	}
+	return owned[recent.AppID].PlaytimeForever
 }
 
 func shareOfTotal(mins, totalMins int) float64 {

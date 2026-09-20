@@ -110,11 +110,9 @@ func TestFetch_AllEndpoints_Mocked(t *testing.T) {
 	require.NotEmpty(t, data.MostPlayed, "most-played should include at least one game")
 	top := data.MostPlayed[0]
 	require.Equal(t, "Counter-Strike", top.Name, "highest playtime wins")
-	require.InDelta(t, 200.0, top.PlaytimeHours, 0.001)
+	require.InDelta(t, 200.0, top.LifetimeHours, 0.001)
 	require.Empty(t, top.IconB64, "env.HTTP is nil so icons must be skipped")
-	// 12000 / 12600 total min.
 	require.InDelta(t, 0.952, top.PercentOfTotal, 0.01)
-	// deck (9000) beats desktop-linux (10000-9000) and windows (2000).
 	require.Equal(t, "Steam Deck", top.Platform)
 	require.Equal(t, "Nov 14, 2023", top.LastPlayed)
 	require.True(t, top.HasAchievements)
@@ -123,7 +121,7 @@ func TestFetch_AllEndpoints_Mocked(t *testing.T) {
 
 	require.NotEmpty(t, data.Recently)
 	require.Equal(t, "Counter-Strike", data.Recently[0].Name)
-	require.InDelta(t, 3.0, data.Recently[0].PlaytimeHours, 0.001)
+	require.InDelta(t, 200.0, data.Recently[0].LifetimeHours, 0.001)
 }
 
 func TestRender_AllSections(t *testing.T) {
@@ -139,12 +137,12 @@ func TestRender_AllSections(t *testing.T) {
 		MostPlayed: []Game{{
 			AppID:         730,
 			Name:          "Counter-Strike",
-			PlaytimeHours: 200,
+			LifetimeHours: 200,
 		}},
 		Recently: []Game{{
 			AppID:         730,
 			Name:          "Counter-Strike",
-			PlaytimeHours: 3,
+			LifetimeHours: 3,
 		}},
 	}
 	frag, err := p.Render(nil, data)

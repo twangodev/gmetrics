@@ -26,12 +26,10 @@ type steamLevelResp struct {
 	} `json:"response"`
 }
 
-// Playtime fields are in minutes.
 type ownedGame struct {
 	AppID           int    `json:"appid"`
 	Name            string `json:"name"`
 	PlaytimeForever int    `json:"playtime_forever"`
-	Playtime2Weeks  int    `json:"playtime_2weeks"`
 	ImgIconURL      string `json:"img_icon_url"`
 	RtimeLastPlayed int64  `json:"rtime_last_played"`
 	PlaytimeWindows int    `json:"playtime_windows_forever"`
@@ -47,12 +45,9 @@ type ownedGamesResp struct {
 	} `json:"response"`
 }
 
-// Playtime fields are in minutes; this endpoint omits rtime_last_played, so
-// fetch.go joins against owned games by appid to recover a last-played date.
 type recentGame struct {
 	AppID           int    `json:"appid"`
 	Name            string `json:"name"`
-	Playtime2Weeks  int    `json:"playtime_2weeks"`
 	PlaytimeForever int    `json:"playtime_forever"`
 	ImgIconURL      string `json:"img_icon_url"`
 	PlaytimeWindows int    `json:"playtime_windows_forever"`

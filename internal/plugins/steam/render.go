@@ -153,7 +153,7 @@ func writeGameCard(buf *bytes.Buffer, g Game, y int, nameFace, fieldFace *canvas
 		infoY += infoRowH
 	}
 
-	emitInfo("clock", fmt.Sprintf("%.1f hours played", g.PlaytimeHours))
+	emitInfo("clock", fmt.Sprintf("%.1f hours played", g.LifetimeHours))
 	if g.PercentOfTotal > 0 {
 		emitInfo("pulse", formatShare(g.PercentOfTotal))
 	}
