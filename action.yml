@@ -96,6 +96,10 @@ inputs:
     description: Avatar size in pixels
     required: false
     default: '28'
+  plugin_people_max_overlap:
+    description: 'Maximum horizontal avatar overlap ratio (0 to less than 1; 0 disables overlap)'
+    required: false
+    default: '0.4'
 
   plugin_wakatime:
     description: Enable the WakaTime plugin

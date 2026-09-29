@@ -172,10 +172,11 @@ func TestE2E_FullPipelineGolden(t *testing.T) {
 				Limit:    8,
 			},
 			People: config.PeopleConfig{
-				Enabled: true,
-				Types:   []string{"followers", "following"},
-				Limit:   4,
-				Size:    28,
+				Enabled:    true,
+				Types:      []string{"followers", "following"},
+				Limit:      4,
+				Size:       28,
+				MaxOverlap: 0.4,
 			},
 			Wakatime: config.WakatimeConfig{
 				Enabled:  true,

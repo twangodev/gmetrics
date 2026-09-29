@@ -59,10 +59,11 @@ type LanguagesConfig struct {
 }
 
 type PeopleConfig struct {
-	Enabled bool     `koanf:"enabled"`
-	Types   []string `koanf:"types"`
-	Limit   int      `koanf:"limit"`
-	Size    int      `koanf:"size"`
+	Enabled    bool     `koanf:"enabled"`
+	Types      []string `koanf:"types"`
+	Limit      int      `koanf:"limit"`
+	Size       int      `koanf:"size"`
+	MaxOverlap float64  `koanf:"max_overlap"`
 }
 
 type WakatimeConfig struct {
@@ -125,6 +126,7 @@ plugins:
     types: [followers, following]
     limit: 40
     size: 28
+    max_overlap: 0.4
   wakatime:
     enabled: false
     url: https://wakatime.com

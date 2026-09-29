@@ -43,6 +43,7 @@ func TestLoad_DefaultsApply(t *testing.T) {
 	require.Equal(t, 100, cfg.Base.Repositories.Max)
 	require.Equal(t, []string{"owner"}, cfg.Base.Repositories.Affiliations)
 	require.Equal(t, 40, cfg.Plugins.People.Limit)
+	require.Equal(t, 0.4, cfg.Plugins.People.MaxOverlap)
 	require.Equal(t, "https://wakatime.com", cfg.Plugins.Wakatime.URL)
 	require.Equal(t, "current", cfg.Plugins.Wakatime.User)
 	require.Equal(t, 7, cfg.Plugins.Wakatime.Days)
@@ -56,6 +57,7 @@ func TestLoadFromEnv_BasicFields(t *testing.T) {
 	t.Setenv("INPUT_BASE_HIREABLE", "yes")
 	t.Setenv("INPUT_PLUGIN_LANGUAGES_SECTIONS", "most-used,recently-used")
 	t.Setenv("INPUT_PLUGIN_PEOPLE_LIMIT", "12")
+	t.Setenv("INPUT_PLUGIN_PEOPLE_MAX_OVERLAP", "0.25")
 
 	cfg, err := config.LoadFromEnv(os.Environ())
 	require.NoError(t, err)
@@ -63,16 +65,32 @@ func TestLoadFromEnv_BasicFields(t *testing.T) {
 	require.True(t, cfg.Base.Hireable)
 	require.Equal(t, []string{"most-used", "recently-used"}, cfg.Plugins.Languages.Sections)
 	require.Equal(t, 12, cfg.Plugins.People.Limit)
+	require.Equal(t, 0.25, cfg.Plugins.People.MaxOverlap)
 }
 
 func TestLoadFromEnv_GmetricsInputsJSON(t *testing.T) {
-	blob := `{"user":"bob","plugin_languages":"yes","plugin_languages_indepth_cache":".cache/x.json","plugin_people_limit":"7"}`
+	blob := `{"user":"bob","plugin_languages":"yes","plugin_languages_indepth_cache":".cache/x.json","plugin_people_limit":"7","plugin_people_max_overlap":"0"}`
 	cfg, err := config.LoadFromEnv([]string{inputsEnvKV(blob)})
 	require.NoError(t, err)
 	require.Equal(t, "bob", cfg.User)
 	require.True(t, cfg.Plugins.Languages.Enabled)
 	require.Equal(t, ".cache/x.json", cfg.Plugins.Languages.IndepthCache)
 	require.Equal(t, 7, cfg.Plugins.People.Limit)
+	require.Zero(t, cfg.Plugins.People.MaxOverlap)
+}
+
+func TestLoad_PeopleOverlap(t *testing.T) {
+	for _, overlap := range []string{"0", "0.25", "0.75"} {
+		t.Run(overlap, func(t *testing.T) {
+			fromYAML, err := config.LoadBytes([]byte("plugins:\n  people:\n    max_overlap: " + overlap + "\n"))
+			require.NoError(t, err)
+			fromEnv, err := config.LoadFromEnv([]string{"INPUT_PLUGIN_PEOPLE_MAX_OVERLAP=" + overlap})
+			require.NoError(t, err)
+			require.Equal(t, fromYAML.Plugins.People.MaxOverlap, fromEnv.Plugins.People.MaxOverlap)
+		})
+	}
+	_, err := config.LoadFromEnv([]string{"INPUT_PLUGIN_PEOPLE_MAX_OVERLAP=invalid"})
+	require.ErrorContains(t, err, "INPUT_PLUGIN_PEOPLE_MAX_OVERLAP")
 }
 
 func TestLoadFromEnv_ExplicitInputOverridesJSON(t *testing.T) {

@@ -224,9 +224,10 @@ func assembleRuns(cfg *config.Config, env *plugin.Env) []pluginRun {
 				name: "people",
 				p:    p,
 				cfg: people.Config{
-					Types: pc.Types,
-					Limit: pc.Limit,
-					Size:  pc.Size,
+					Types:      pc.Types,
+					Limit:      pc.Limit,
+					Size:       pc.Size,
+					MaxOverlap: pc.MaxOverlap,
 				},
 			})
 		} else {

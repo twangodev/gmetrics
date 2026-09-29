@@ -55,6 +55,7 @@ const (
 	envString envFieldKind = iota
 	envBool
 	envInt
+	envFloat
 	envCSV
 )
 
@@ -90,6 +91,7 @@ var envMappings = map[string]envMapping{
 	"PLUGIN_PEOPLE_TYPES":             {"plugins.people.types", envCSV},
 	"PLUGIN_PEOPLE_LIMIT":             {"plugins.people.limit", envInt},
 	"PLUGIN_PEOPLE_SIZE":              {"plugins.people.size", envInt},
+	"PLUGIN_PEOPLE_MAX_OVERLAP":       {"plugins.people.max_overlap", envFloat},
 	"PLUGIN_WAKATIME":                 {"plugins.wakatime.enabled", envBool},
 	"PLUGIN_WAKATIME_TOKEN":           {"plugins.wakatime.token", envString},
 	"PLUGIN_WAKATIME_URL":             {"plugins.wakatime.url", envString},
@@ -121,6 +123,12 @@ func parseEnvValue(raw string, kind envFieldKind) (any, error) {
 		n, err := strconv.Atoi(strings.TrimSpace(raw))
 		if err != nil {
 			return nil, fmt.Errorf("invalid int %q: %w", raw, err)
+		}
+		return n, nil
+	case envFloat:
+		n, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid float %q: %w", raw, err)
 		}
 		return n, nil
 	case envCSV:
