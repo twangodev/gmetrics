@@ -20,6 +20,11 @@ A Go port of [lowlighter/metrics](https://github.com/lowlighter/metrics) for the
 Use `@v1` for the latest compatible release, or a release tag/full commit SHA
 with a published matching image. Requires a Linux runner with Docker.
 
+People avatars overlap by 40% and wrap into additional rows at their configured
+size. Set `plugin_people_max_overlap` (YAML: `plugins.people.max_overlap`) to a
+ratio from `0` to less than `1`; `0` disables overlap. `plugin_people_limit`
+controls how many people are fetched, with a `+N` badge for the remainder.
+
 When `plugin_languages_indepth` is enabled the action caches per-repo language
 stats across runs automatically, so each run only processes commits added since
 the previous one. No extra workflow steps are required.
