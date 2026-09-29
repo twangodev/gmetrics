@@ -41,10 +41,30 @@ func (*Plugin) DecodeConfig(raw map[string]any) (any, error) {
 		}
 		cfg.Size = n
 	}
+	if v, ok := raw["max_overlap"]; ok {
+		n, err := toFloat(v)
+		if err != nil {
+			return nil, fmt.Errorf("people: max_overlap: %w", err)
+		}
+		cfg.MaxOverlap = n
+	}
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+func toFloat(v any) (float64, error) {
+	switch n := v.(type) {
+	case float64:
+		return n, nil
+	case int:
+		return float64(n), nil
+	case int64:
+		return float64(n), nil
+	default:
+		return 0, fmt.Errorf("want number, got %T", v)
+	}
 }
 
 func toStringSlice(v any) ([]string, error) {

@@ -19,20 +19,16 @@ const headerHeight = 28
 const rowGap = 4
 const sectionPadBot = 8
 
-// Keep the people grid compact while preserving recognizable avatars. At the
-// 440px content width, an 18px cell fits 20 columns and 40 total slots.
-const maxPeopleRows = 2
-const minAvatarSize = 18
-
 type sectionLayout struct {
-	cellSize      int
-	cols          int
-	visiblePeople int
-	overflow      int
+	avatarSize  int
+	columnStep  int
+	columns     int
+	peopleCount int
+	overflow    int
 }
 
 func (l sectionLayout) slots() int {
-	n := l.visiblePeople
+	n := l.peopleCount
 	if l.overflow > 0 {
 		n++
 	}
@@ -44,8 +40,8 @@ func (*Plugin) Render(env *plugin.Env, raw any) (plugin.Fragment, error) {
 	if !ok {
 		return plugin.Fragment{}, fmt.Errorf("people: render: want Data, got %T", raw)
 	}
-	if data.Size <= 0 {
-		return plugin.Fragment{}, fmt.Errorf("people: render: invalid Size %d", data.Size)
+	if err := validateLayout(data.Size, data.MaxOverlap); err != nil {
+		return plugin.Fragment{}, err
 	}
 
 	headerFace, err := render.Face(14, canvas.FontBold)
@@ -56,12 +52,11 @@ func (*Plugin) Render(env *plugin.Env, raw any) (plugin.Fragment, error) {
 	var buf bytes.Buffer
 	y := 0
 	for _, section := range data.Sections {
-		layout := layoutSection(section, data.Size)
-		secH := sectionHeight(layout.slots(), layout.cellSize, layout.cols)
+		layout := layoutSection(section, data.Size, data.MaxOverlap)
 		if err := writeSection(&buf, section, y, layout, headerFace); err != nil {
 			return plugin.Fragment{}, err
 		}
-		y += secH
+		y += layout.height()
 	}
 
 	return plugin.Fragment{
@@ -71,63 +66,27 @@ func (*Plugin) Render(env *plugin.Env, raw any) (plugin.Fragment, error) {
 	}, nil
 }
 
-func layoutSection(section Section, requestedSize int) sectionLayout {
-	shrinkFloor := minAvatarSize
-	if requestedSize < shrinkFloor {
-		shrinkFloor = requestedSize
+func layoutSection(section Section, size int, maxOverlap float64) sectionLayout {
+	step := max(1, int(math.Ceil(float64(size)*(1-maxOverlap))))
+	if maxOverlap == 0 {
+		step = size + rowGap
 	}
-	maxCols := columnsFor(shrinkFloor)
-	maxSlots := maxPeopleRows * maxCols
-
-	total := section.Total
-	if total < len(section.People) {
-		total = len(section.People)
-	}
-	visible := len(section.People)
-	if visible > maxSlots {
-		visible = maxSlots
-	}
-	overflow := total - visible
-	if overflow > 0 && visible == maxSlots {
-		visible--
-		overflow = total - visible
-	}
-
-	slots := visible
-	if overflow > 0 {
-		slots++
-	}
-	cellSize := requestedSize
-	if slots > 0 {
-		requiredCols := (slots + maxPeopleRows - 1) / maxPeopleRows
-		largestFit := (fragmentWidth - (requiredCols-1)*rowGap) / requiredCols
-		if largestFit < cellSize {
-			cellSize = largestFit
-		}
-		if cellSize < shrinkFloor {
-			cellSize = shrinkFloor
-		}
-	}
-
 	return sectionLayout{
-		cellSize:      cellSize,
-		cols:          columnsFor(cellSize),
-		visiblePeople: visible,
-		overflow:      overflow,
+		avatarSize:  size,
+		columnStep:  step,
+		columns:     1 + (fragmentWidth-size)/step,
+		peopleCount: len(section.People),
+		overflow:    max(0, section.Total-len(section.People)),
 	}
 }
 
-func columnsFor(cellSize int) int {
-	cols := (fragmentWidth + rowGap) / (cellSize + rowGap)
-	if cols < 1 {
-		return 1
-	}
-	return cols
+func (l sectionLayout) height() int {
+	rows := (l.slots() + l.columns - 1) / l.columns
+	return headerHeight + rows*(l.avatarSize+rowGap) + sectionPadBot
 }
 
-func sectionHeight(n, cellSize, cols int) int {
-	rows := (n + cols - 1) / cols
-	return headerHeight + rows*(cellSize+rowGap) + sectionPadBot
+func (l sectionLayout) position(i int) (int, int) {
+	return (i % l.columns) * l.columnStep, headerHeight + (i/l.columns)*(l.avatarSize+rowGap)
 }
 
 func writeSection(buf *bytes.Buffer, s Section, y int, layout sectionLayout, headerFace *canvas.FontFace) error {
@@ -139,25 +98,19 @@ func writeSection(buf *bytes.Buffer, s Section, y int, layout sectionLayout, hea
 	render.EmitOcticon(buf, 0, 6, 16, "people", "#959da5")
 	render.EmitTextPath(buf, 22, 18, header, headerFace)
 
-	for i, p := range s.People[:layout.visiblePeople] {
-		x, cy := slotPosition(i, layout.cellSize, layout.cols)
-		writeAvatar(buf, p, x, cy, layout.cellSize)
+	for i, p := range s.People {
+		x, cy := layout.position(i)
+		writeAvatar(buf, p, x, cy, layout.avatarSize)
 	}
 	if layout.overflow > 0 {
-		x, cy := slotPosition(layout.visiblePeople, layout.cellSize, layout.cols)
-		if err := writeOverflow(buf, layout.overflow, x, cy, layout.cellSize); err != nil {
+		x, cy := layout.position(layout.peopleCount)
+		if err := writeOverflow(buf, layout.overflow, x, cy, layout.avatarSize); err != nil {
 			return fmt.Errorf("people: render overflow: %w", err)
 		}
 	}
 
 	fmt.Fprint(buf, `</g>`)
 	return nil
-}
-
-func slotPosition(i, cellSize, cols int) (int, int) {
-	col := i % cols
-	row := i / cols
-	return col * (cellSize + rowGap), headerHeight + row*(cellSize+rowGap)
 }
 
 func writeAvatar(buf *bytes.Buffer, p Person, x, y, size int) {
@@ -175,11 +128,20 @@ func writeAvatar(buf *bytes.Buffer, p Person, x, y, size int) {
 			`</clipPath></defs><image data-account-type="%s" x="%d" y="%d" width="%d" height="%d" href="%s" clip-path="url(#%s)" preserveAspectRatio="xMidYMid slice"><title>%s</title></image>`,
 			accountType, x, y, size, size, xmlEscapeAttr(p.AvatarB64), clipID, xmlEscape(p.Login),
 		)
+	} else {
+		fmt.Fprintf(buf, `<g data-account-type="%s"><title>%s</title>`, accountType, xmlEscape(p.Login))
+		writeAvatarShape(buf, p.IsOrganization, x, y, size, ` fill="#d0d7de"`)
+		fmt.Fprint(buf, `</g>`)
+	}
+	writeAvatarBorder(buf, p.IsOrganization, x, y, size)
+}
+
+func writeAvatarBorder(buf *bytes.Buffer, organization bool, x, y, size int) {
+	if size < 3 {
 		return
 	}
-	fmt.Fprintf(buf, `<g data-account-type="%s"><title>%s</title>`, accountType, xmlEscape(p.Login))
-	writeAvatarShape(buf, p.IsOrganization, x, y, size, ` fill="#d0d7de"`)
-	fmt.Fprint(buf, `</g>`)
+	writeAvatarShape(buf, organization, x+1, y+1, size-2,
+		` class="people-avatar-border" fill="none" stroke="#ffffff" stroke-width="2"`)
 }
 
 func writeAvatarShape(buf *bytes.Buffer, organization bool, x, y, size int, attrs string) {
@@ -194,7 +156,7 @@ func writeAvatarShape(buf *bytes.Buffer, organization bool, x, y, size int, attr
 		)
 		return
 	}
-	fmt.Fprintf(buf, `<circle cx="%d" cy="%d" r="%d"%s/>`, x+size/2, y+size/2, size/2, attrs)
+	fmt.Fprintf(buf, `<circle cx="%g" cy="%g" r="%g"%s/>`, float64(x)+float64(size)/2, float64(y)+float64(size)/2, float64(size)/2, attrs)
 }
 
 func writeOverflow(buf *bytes.Buffer, hidden, x, y, size int) error {
@@ -213,13 +175,12 @@ func writeOverflow(buf *bytes.Buffer, hidden, x, y, size int) error {
 		fontSize -= 0.5
 	}
 
-	cx := x + size/2
-	cy := y + size/2
-	r := size / 2
 	fmt.Fprintf(buf,
-		`<g class="people-overflow" data-overflow="%d"><title>%d more</title><circle cx="%d" cy="%d" r="%d" fill="#d0d7de"/>`,
-		hidden, hidden, cx, cy, r,
+		`<g class="people-overflow" data-overflow="%d"><title>%d more</title>`,
+		hidden, hidden,
 	)
+	writeAvatarShape(buf, false, x, y, size, ` fill="#d0d7de"`)
+	writeAvatarBorder(buf, false, x, y, size)
 	textWidth := render.TextWidth(face, label)
 	textX := x + int((float64(size)-textWidth)/2+0.5)
 	baselineY := y + size/2 + int(fontSize*0.35+0.5)

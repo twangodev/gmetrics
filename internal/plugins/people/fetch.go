@@ -64,7 +64,7 @@ func (*Plugin) Fetch(ctx context.Context, env *plugin.Env, raw any) (any, error)
 		return fetchREST(ctx, env, login, cfg)
 	}
 
-	data := Data{Size: cfg.Size}
+	data := Data{Size: cfg.Size, MaxOverlap: cfg.MaxOverlap}
 	for _, t := range cfg.Types {
 		people, total, err := fetchTypeGraphQL(ctx, env, login, t, cfg)
 		if err != nil {
@@ -91,7 +91,7 @@ func fetchREST(ctx context.Context, env *plugin.Env, login string, cfg Config) (
 		"following": profile.GetFollowing(),
 	}
 
-	data := Data{Size: cfg.Size}
+	data := Data{Size: cfg.Size, MaxOverlap: cfg.MaxOverlap}
 	for _, t := range cfg.Types {
 		people, err := fetchTypeREST(ctx, env, login, t, cfg)
 		if err != nil {

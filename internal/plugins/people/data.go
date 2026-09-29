@@ -15,6 +15,7 @@ type Section struct {
 }
 
 type Data struct {
-	Sections []Section
-	Size     int
+	Sections   []Section
+	Size       int
+	MaxOverlap float64
 }
