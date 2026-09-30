@@ -54,7 +54,7 @@ func TestRender_TwoSections(t *testing.T) {
 	require.Contains(t, frag.Body, `data-type="following"`)
 
 	const totalPeopleAndOverflowMarkers = 7
-	require.Equal(t, totalPeopleAndOverflowMarkers, strings.Count(frag.Body, `class="people-avatar-border"`))
+	require.Equal(t, totalPeopleAndOverflowMarkers, strings.Count(frag.Body, "<circle"))
 	require.Contains(t, frag.Body, `data-overflow="1231"`)
 	require.Contains(t, frag.Body, `data-overflow="40"`)
 

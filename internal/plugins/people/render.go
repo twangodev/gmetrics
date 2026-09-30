@@ -133,15 +133,6 @@ func writeAvatar(buf *bytes.Buffer, p Person, x, y, size int) {
 		writeAvatarShape(buf, p.IsOrganization, x, y, size, ` fill="#d0d7de"`)
 		fmt.Fprint(buf, `</g>`)
 	}
-	writeAvatarBorder(buf, p.IsOrganization, x, y, size)
-}
-
-func writeAvatarBorder(buf *bytes.Buffer, organization bool, x, y, size int) {
-	if size < 3 {
-		return
-	}
-	writeAvatarShape(buf, organization, x+1, y+1, size-2,
-		` class="people-avatar-border" fill="none" stroke="#ffffff" stroke-width="2"`)
 }
 
 func writeAvatarShape(buf *bytes.Buffer, organization bool, x, y, size int, attrs string) {
@@ -180,7 +171,6 @@ func writeOverflow(buf *bytes.Buffer, hidden, x, y, size int) error {
 		hidden, hidden,
 	)
 	writeAvatarShape(buf, false, x, y, size, ` fill="#d0d7de"`)
-	writeAvatarBorder(buf, false, x, y, size)
 	textWidth := render.TextWidth(face, label)
 	textX := x + int((float64(size)-textWidth)/2+0.5)
 	baselineY := y + size/2 + int(fontSize*0.35+0.5)
