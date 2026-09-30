@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 
@@ -122,9 +123,9 @@ func TestRender_OrganizationsUseRoundedSquareAvatars(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Contains(t, frag.Body, `data-account-type="organization"`)
-	require.Contains(t, frag.Body, `<rect x="0" y="28" width="28" height="28" rx="4" ry="4"/>`)
+	require.Regexp(t, `<clipPath id="avatar-clip-acme-[^"]+"><rect x="[0-9]+" y="28" width="28" height="28" rx="4" ry="4"/></clipPath>`, frag.Body)
 	require.Contains(t, frag.Body, `data-account-type="user"`)
-	require.Contains(t, frag.Body, `<circle cx="46" cy="42" r="14"/>`)
+	require.Regexp(t, `<clipPath id="avatar-clip-alice-[^"]+"><circle cx="[0-9]+" cy="42" r="14"/></clipPath>`, frag.Body)
 }
 
 func TestFetch_FollowersAndFollowing_Counts(t *testing.T) {
@@ -255,6 +256,20 @@ type renderedAvatar struct {
 	Title  string `xml:"title"`
 }
 
+type renderedSection struct {
+	Type    string           `xml:"data-type,attr"`
+	Avatars []renderedAvatar `xml:"image"`
+}
+
+func readRenderedSections(t *testing.T, body string) []renderedSection {
+	t.Helper()
+	var svg struct {
+		Sections []renderedSection `xml:"g"`
+	}
+	require.NoError(t, xml.Unmarshal([]byte("<svg>"+body+"</svg>"), &svg))
+	return svg.Sections
+}
+
 func TestRender_RowWrapping(t *testing.T) {
 	for _, tc := range []struct {
 		name                              string
@@ -287,15 +302,11 @@ func TestRender_RowWrapping(t *testing.T) {
 				Sections: []people.Section{{Type: "following", Total: tc.count, People: list}},
 			})
 			require.NoError(t, err)
-			var svg struct {
-				Sections []struct {
-					Avatars []renderedAvatar `xml:"image"`
-				} `xml:"g"`
-			}
-			require.NoError(t, xml.Unmarshal([]byte("<svg>"+frag.Body+"</svg>"), &svg))
-			require.Len(t, svg.Sections, 1)
-			require.Len(t, svg.Sections[0].Avatars, tc.count)
-			for i, avatar := range svg.Sections[0].Avatars {
+			sections := readRenderedSections(t, frag.Body)
+			require.Len(t, sections, 1)
+			require.Len(t, sections[0].Avatars, tc.count)
+			var gotLogins, wantLogins []string
+			for i, avatar := range sections[0].Avatars {
 				step := tc.step
 				if i/tc.cols == (tc.count-1)/tc.cols {
 					step = tc.lastStep
@@ -306,11 +317,58 @@ func TestRender_RowWrapping(t *testing.T) {
 				require.Equal(t, tc.size, avatar.Height)
 				require.LessOrEqual(t, avatar.X+avatar.Width, frag.Width)
 				require.LessOrEqual(t, avatar.Y+avatar.Height, frag.Height)
-				require.Equal(t, list[i].Login, avatar.Title)
+				gotLogins = append(gotLogins, avatar.Title)
+				wantLogins = append(wantLogins, list[i].Login)
 			}
+			require.ElementsMatch(t, wantLogins, gotLogins)
 			rows := (tc.count + tc.cols - 1) / tc.cols
 			require.Equal(t, 36+rows*(tc.size+4), frag.Height)
 		})
+	}
+}
+
+func TestRender_ShufflesEachSectionWithoutMutatingData(t *testing.T) {
+	data := people.Data{Size: 28, MaxOverlap: 0.4}
+	for _, kind := range []string{"followers", "following"} {
+		section := people.Section{Type: kind, Total: 20}
+		for i := range section.Total {
+			section.People = append(section.People, people.Person{
+				Login: fmt.Sprintf("%s-%02d", kind, i), AvatarB64: "data:image/png;base64,AA==",
+			})
+		}
+		data.Sections = append(data.Sections, section)
+	}
+	before := slices.Clone(data.Sections)
+	for i := range before {
+		before[i].People = slices.Clone(before[i].People)
+	}
+	firstOrders := make([][]string, len(data.Sections))
+	changed := make([]bool, len(data.Sections))
+	for pass := range 5 {
+		frag, err := (&people.Plugin{}).Render(nil, data)
+		require.NoError(t, err)
+		sections := readRenderedSections(t, frag.Body)
+		require.Len(t, sections, len(data.Sections))
+		for i, section := range sections {
+			require.Equal(t, before[i].Type, section.Type)
+			var gotLogins, wantLogins []string
+			for _, avatar := range section.Avatars {
+				gotLogins = append(gotLogins, avatar.Title)
+			}
+			for _, person := range before[i].People {
+				wantLogins = append(wantLogins, person.Login)
+			}
+			require.ElementsMatch(t, wantLogins, gotLogins)
+			if pass == 0 {
+				firstOrders[i] = gotLogins
+			} else if !slices.Equal(firstOrders[i], gotLogins) {
+				changed[i] = true
+			}
+		}
+		require.Equal(t, before, data.Sections)
+	}
+	for i := range changed {
+		require.True(t, changed[i], data.Sections[i].Type+" should shuffle on each render")
 	}
 }
 

@@ -5,6 +5,8 @@ import (
 	"encoding/xml"
 	"fmt"
 	"math"
+	"math/rand/v2"
+	"slices"
 	"strings"
 
 	"github.com/tdewolff/canvas"
@@ -51,6 +53,7 @@ func (*Plugin) Render(env *plugin.Env, raw any) (plugin.Fragment, error) {
 	var buf bytes.Buffer
 	y := 0
 	for _, section := range data.Sections {
+		section.People = shuffledPeople(section.People)
 		layout := layoutSection(section, data.Size, data.MaxOverlap)
 		if err := writeSection(&buf, section, y, layout, headerFace); err != nil {
 			return plugin.Fragment{}, err
@@ -63,6 +66,14 @@ func (*Plugin) Render(env *plugin.Env, raw any) (plugin.Fragment, error) {
 		Width:  fragmentWidth,
 		Height: y,
 	}, nil
+}
+
+func shuffledPeople(people []Person) []Person {
+	shuffled := slices.Clone(people)
+	rand.Shuffle(len(shuffled), func(i, j int) {
+		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+	})
+	return shuffled
 }
 
 func layoutSection(section Section, size int, maxOverlap float64) sectionLayout {

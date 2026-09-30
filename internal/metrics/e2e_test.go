@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -117,9 +118,10 @@ func e2eHandler(t *testing.T) http.Handler {
 	return mux
 }
 
-// stripVolatile is the hook for redacting run-to-run drift; nothing drifts yet.
-func stripVolatile(s string) string {
-	return s
+var peopleAvatarPattern = regexp.MustCompile(`<defs><clipPath id="avatar-clip-[^"]+">.*?</clipPath></defs><image data-account-type="[^"]+" x="([0-9]+)" y="([0-9]+)" width="([0-9]+)" height="([0-9]+)"[^>]*><title>.*?</title></image>`)
+
+func normalizeShuffledAvatars(s string) string {
+	return peopleAvatarPattern.ReplaceAllString(s, `<image x="$1" y="$2" width="$3" height="$4"/>`)
 }
 
 func TestE2E_FullPipelineGolden(t *testing.T) {
@@ -240,7 +242,7 @@ func TestE2E_FullPipelineGolden(t *testing.T) {
 		goldie.WithFixtureDir("testdata/golden"),
 		goldie.WithNameSuffix(".golden.svg"),
 	)
-	g.Assert(t, "e2e_full", []byte(stripVolatile(svg)))
+	g.Assert(t, "e2e_full", []byte(normalizeShuffledAvatars(svg)))
 }
 
 const graphqlBaseProfileJSON = `{

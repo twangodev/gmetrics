@@ -21,9 +21,9 @@ Use `@v1` for the latest compatible release, or a release tag/full commit SHA
 with a published matching image. Requires a Linux runner with Docker.
 
 People avatars keep their configured size and overlap only when needed, up to
-40% by default, then wrap into additional rows. Set `plugin_people_max_overlap`
-(YAML: `plugins.people.max_overlap`) to a
-ratio from `0` to less than `1`; `0` disables overlap. `plugin_people_limit`
+40% by default, then wrap into additional rows. Each render shuffles the order.
+Set `plugin_people_max_overlap` (YAML: `plugins.people.max_overlap`) to a ratio
+from `0` to less than `1`; `0` disables overlap. `plugin_people_limit`
 controls how many people are fetched, with a `+N` badge for the remainder.
 
 When `plugin_languages_indepth` is enabled the action caches per-repo language
