@@ -21,7 +21,6 @@ const sectionPadBot = 8
 
 type sectionLayout struct {
 	avatarSize  int
-	columnStep  int
 	columns     int
 	peopleCount int
 	overflow    int
@@ -67,17 +66,19 @@ func (*Plugin) Render(env *plugin.Env, raw any) (plugin.Fragment, error) {
 }
 
 func layoutSection(section Section, size int, maxOverlap float64) sectionLayout {
-	step := max(1, int(math.Ceil(float64(size)*(1-maxOverlap))))
+	minimumStep := max(1, int(math.Ceil(float64(size)*(1-maxOverlap))))
 	if maxOverlap == 0 {
-		step = size + rowGap
+		minimumStep = size + rowGap
 	}
-	return sectionLayout{
+	layout := sectionLayout{
 		avatarSize:  size,
-		columnStep:  step,
-		columns:     1 + (fragmentWidth-size)/step,
 		peopleCount: len(section.People),
 		overflow:    max(0, section.Total-len(section.People)),
 	}
+	maxColumns := 1 + (fragmentWidth-size)/minimumStep
+	rows := max(1, (layout.slots()+maxColumns-1)/maxColumns)
+	layout.columns = max(1, (layout.slots()+rows-1)/rows)
+	return layout
 }
 
 func (l sectionLayout) height() int {
@@ -86,7 +87,13 @@ func (l sectionLayout) height() int {
 }
 
 func (l sectionLayout) position(i int) (int, int) {
-	return (i % l.columns) * l.columnStep, headerHeight + (i/l.columns)*(l.avatarSize+rowGap)
+	row := i / l.columns
+	rowSlots := min(l.columns, l.slots()-row*l.columns)
+	step := l.avatarSize + rowGap
+	if rowSlots > 1 {
+		step = min(step, (fragmentWidth-l.avatarSize)/(rowSlots-1))
+	}
+	return (i % l.columns) * step, headerHeight + row*(l.avatarSize+rowGap)
 }
 
 func writeSection(buf *bytes.Buffer, s Section, y int, layout sectionLayout, headerFace *canvas.FontFace) error {

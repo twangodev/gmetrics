@@ -257,20 +257,25 @@ type renderedAvatar struct {
 
 func TestRender_RowWrapping(t *testing.T) {
 	for _, tc := range []struct {
-		name                    string
-		count, size, step, cols int
-		overlap                 float64
+		name                              string
+		count, size, step, lastStep, cols int
+		overlap                           float64
 	}{
-		{"empty", 0, 28, 17, 25, 0.4},
-		{"single", 1, 28, 17, 25, 0.4},
-		{"full row", 25, 28, 17, 25, 0.4},
-		{"wrap", 26, 28, 17, 25, 0.4},
-		{"four rows", 76, 28, 17, 25, 0.4},
-		{"no overlap", 40, 28, 32, 13, 0},
-		{"dense", 100, 28, 7, 59, 0.75},
-		{"odd size", 26, 27, 17, 25, 0.4},
-		{"full width", 3, 440, 264, 1, 0.4},
-		{"tiny", 441, 1, 1, 440, 0.99},
+		{"empty", 0, 28, 32, 32, 1, 0.4},
+		{"single", 1, 28, 32, 32, 1, 0.4},
+		{"short row", 12, 28, 32, 32, 12, 0.4},
+		{"normal row", 13, 28, 32, 32, 13, 0.4},
+		{"reduced gap", 14, 28, 31, 31, 14, 0.4},
+		{"minimal overlap", 16, 28, 27, 27, 16, 0.4},
+		{"full row", 25, 28, 17, 17, 25, 0.4},
+		{"wrap without overlap", 26, 28, 32, 32, 13, 0.4},
+		{"short final row", 31, 28, 27, 29, 16, 0.4},
+		{"four rows", 76, 28, 22, 22, 19, 0.4},
+		{"no overlap", 40, 28, 32, 32, 10, 0},
+		{"dense", 100, 28, 8, 8, 50, 0.75},
+		{"odd size", 26, 27, 31, 31, 13, 0.4},
+		{"full width", 3, 440, 444, 444, 1, 0.4},
+		{"tiny", 441, 1, 1, 2, 221, 0.99},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			list := make([]people.Person, tc.count)
@@ -291,7 +296,11 @@ func TestRender_RowWrapping(t *testing.T) {
 			require.Len(t, svg.Sections, 1)
 			require.Len(t, svg.Sections[0].Avatars, tc.count)
 			for i, avatar := range svg.Sections[0].Avatars {
-				require.Equal(t, (i%tc.cols)*tc.step, avatar.X)
+				step := tc.step
+				if i/tc.cols == (tc.count-1)/tc.cols {
+					step = tc.lastStep
+				}
+				require.Equal(t, (i%tc.cols)*step, avatar.X)
 				require.Equal(t, 28+(i/tc.cols)*(tc.size+4), avatar.Y)
 				require.Equal(t, tc.size, avatar.Width)
 				require.Equal(t, tc.size, avatar.Height)
