@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.9.0](https://github.com/twangodev/gmetrics/compare/v1.8.0...v1.9.0) (2026-09-30)
+
+
+### Features
+
+* **config:** expose the people avatar overlap ratio ([2828007](https://github.com/twangodev/gmetrics/commit/2828007e9f29331e18cab39dc8cf3929d59ae29f))
+* **people:** overlap avatars and wrap without a row cap ([11ff17c](https://github.com/twangodev/gmetrics/commit/11ff17c843584d5bc998428485c47f06c05e7994))
+* **people:** shuffle avatars on each render ([e3263f9](https://github.com/twangodev/gmetrics/commit/e3263f962c9af5db2f960828874e0660c23b488b))
+
+
+### Bug Fixes
+
+* **people:** overlap avatars only when needed ([7663048](https://github.com/twangodev/gmetrics/commit/7663048013f90105942688d6ddeb000a0cd76e6a))
+* **people:** remove white avatar outlines ([4fcc9be](https://github.com/twangodev/gmetrics/commit/4fcc9be69cfc843b992a1187a026b1ca8d6598b7))
+
 ## [1.8.0](https://github.com/twangodev/gmetrics/compare/v1.7.1...v1.8.0) (2026-09-20)
 
 
